@@ -1,0 +1,60 @@
+# Dependencias
+node_modules/
+jspm_packages/
+.npm/
+
+# Compilados y Builds
+dist/
+dist-electron/
+out/
+build/
+release/
+bin/
+obj/
+*.exe
+*.rar
+*.zip
+*.7z
+
+# Firebase
+.firebase/
+firebase-debug.log*
+.firebaserc
+
+# Mobile / Android / iOS
+android/
+ios/
+.capacitor/
+capacitor.config.ts
+capacitor.config.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# Entorno y Secretos
+.env
+.env.*
+!.env.example
+
+# Configuración del Sistema y Editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Archivos Locales de la App
+config.json
+.mdt_manifest.json
+
+# Temporales de Vite/Build
+.vite/
+.cache/

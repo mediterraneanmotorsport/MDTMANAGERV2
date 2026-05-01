@@ -1,0 +1,72 @@
+{
+  "name": "mdt-setup-manager",
+  "private": true,
+  "version": "0.0.0",
+  "description": "MDT Setup Manager for Le Mans Ultimate",
+  "author": "Team MDT",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder",
+    "mobile:sync": "npm run build && npx cap copy && npx cap sync",
+    "mobile:open-android": "npx cap open android",
+    "mobile:open-ios": "npx cap open ios"
+  },
+  "build": {
+    "appId": "com.mdt.setupmanager",
+    "productName": "MDT Setup Manager",
+    "copyright": "Copyright © 2026 Team MDT",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/logo.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "MDT Setup Manager"
+    }
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.1",
+    "@capacitor/cli": "^8.0.1",
+    "@capacitor/core": "^8.0.1",
+    "@capacitor/ios": "^8.0.1",
+    "electron-squirrel-startup": "^1.0.1",
+    "firebase": "^12.8.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@eslint/js": "^9.39.1",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.23",
+    "concurrently": "^9.2.1",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "vite": "^7.2.4",
+    "wait-on": "^9.0.3"
+  }
+}
