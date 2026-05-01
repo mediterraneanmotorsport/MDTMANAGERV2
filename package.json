@@ -1,7 +1,7 @@
 {
   "name": "mdt-setup-manager",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "description": "MDT Setup Manager for Le Mans Ultimate",
   "author": "Team MDT",
   "type": "module",
@@ -20,6 +20,13 @@
     "appId": "com.mdt.setupmanager",
     "productName": "MDT Setup Manager",
     "copyright": "Copyright © 2026 Team MDT",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mediterraneanmotorsport",
+        "repo": "MDTMANAGERV2"
+      }
+    ],
     "directories": {
       "output": "dist-electron"
     },
@@ -29,7 +36,9 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis"
+      ],
       "icon": "public/logo.png"
     },
     "nsis": {
