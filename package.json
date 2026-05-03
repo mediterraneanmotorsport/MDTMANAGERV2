@@ -1,7 +1,7 @@
 {
   "name": "mdt-setup-manager",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "MDT Setup Manager for Le Mans Ultimate",
   "author": "Team MDT",
   "type": "module",
@@ -20,6 +20,7 @@
     "appId": "com.mdt.setupmanager",
     "productName": "MDT Setup Manager",
     "copyright": "Copyright © 2026 Team MDT",
+    "npmRebuild": false,
     "publish": [
       {
         "provider": "github",
@@ -47,18 +48,15 @@
     }
   },
   "dependencies": {
+    "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
     "@capacitor/android": "^8.0.1",
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.0.1",
     "@capacitor/core": "^8.0.1",
     "@capacitor/ios": "^8.0.1",
-    "electron-squirrel-startup": "^1.0.1",
-    "electron-updater": "^6.8.3",
-    "firebase": "^12.8.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/react": "^19.2.5",
@@ -71,8 +69,11 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
+    "firebase": "^12.8.0",
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "tailwindcss": "^4.1.18",
     "vite": "^7.2.4",
     "wait-on": "^9.0.3"
