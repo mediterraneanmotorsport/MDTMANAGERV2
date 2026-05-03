@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+/MDTMANAGERV2
+/dist-electron
+/backup_estable.zip
+/backups
+
+# Secrets & env
+.env
+.env.*
+*.pem
+
+# Firebase local files
+.firebase/
