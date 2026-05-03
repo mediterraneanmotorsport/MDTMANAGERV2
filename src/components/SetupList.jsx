@@ -148,39 +148,40 @@ const SetupList = ({ circuit, car, gamePath, onClose, userRole, installedSetups,
 
     return (
         <div 
-            className="w-screen lg:w-[600px] h-full liquid-glass border-l border-white/5 flex flex-col overflow-hidden pointer-events-auto shadow-[0_0_100px_rgba(0,0,0,0.8)] motion-blur-in"
+            className="w-screen lg:w-[580px] h-full wec-glass border-l border-wec-border flex flex-col overflow-hidden pointer-events-auto shadow-[0_0_80px_rgba(0,0,0,0.7)] wec-slide-left"
             style={{ WebkitAppRegion: 'no-drag' }}
         >
             {/* Tactical Header */}
-            <header className="p-8 border-b border-white/5 relative overflow-hidden shrink-0">
-                <div className="absolute inset-0 shimmer-bg opacity-10" />
+            <header className="p-6 border-b border-wec-border relative overflow-hidden shrink-0">
+                <div className="absolute inset-0 wec-shimmer opacity-10" />
+                <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-wec-cyan via-wec-blue to-transparent" />
                 <div className="flex items-center justify-between relative z-10">
                     <div className="space-y-1">
-                        <div className="flex items-center gap-3">
-                            <span className="w-8 h-0.5 bg-racing-orange rounded-full" />
-                            <h2 className="text-[10px] font-black uppercase tracking-[0.4em] text-racing-orange">INFO CIRCUITO</h2>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1 h-3 bg-wec-gold" />
+                            <span className="wec-label text-wec-gold/70">Circuito</span>
                         </div>
-                        <h3 className="text-3xl font-black text-racing-italic truncate max-w-sm">{circuit.name}</h3>
-                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{car} • Análisis de Setups</p>
+                        <h3 className="text-2xl font-bold text-white uppercase tracking-tight truncate max-w-sm" style={{fontFamily:'var(--font-body)'}}>{circuit.name}</h3>
+                        <p className="text-[10px] text-white/20 font-medium uppercase tracking-wider">{car} • Setups</p>
                     </div>
                     <button 
                         onClick={onClose}
                         style={{ WebkitAppRegion: 'no-drag' }}
-                        className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
+                        className="p-2.5 bg-white/3 hover:bg-white/5 rounded-lg transition-all border border-white/5 text-white/30 hover:text-white"
                     >
-                        <svg className="w-5 h-5 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
             </header>
 
             {/* Setups Container */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-black/40">
+            <div className="flex-1 overflow-y-auto p-5 space-y-3 wec-scrollbar bg-wec-void/40">
                 {loading ? (
-                    <div className="flex flex-col items-center justify-center py-32 gap-6">
-                        <div className="w-12 h-12 rounded-full border-2 border-racing-blue/20 border-t-racing-blue animate-spin" />
-                        <div className="text-center space-y-2">
-                            <span className="text-[10px] font-black uppercase tracking-[0.5em] text-racing-blue animate-pulse block">CONECTANDO CON RED WEC</span>
-                            <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-widest opacity-50 block">SINCRONIZANDO BASE DE DATOS...</span>
+                    <div className="flex flex-col items-center justify-center py-32 gap-5">
+                        <div className="w-10 h-10 rounded-full border-2 border-wec-blue/20 border-t-wec-cyan animate-spin" />
+                        <div className="text-center space-y-1">
+                            <span className="text-wec-display text-[8px] font-bold uppercase tracking-[0.4em] text-wec-cyan/50 block">Conectando</span>
+                            <span className="text-wec-display text-[7px] text-white/10 uppercase tracking-wider block">Sincronizando...</span>
                         </div>
                     </div>
                 ) : setups.length > 0 ? (
@@ -190,10 +191,10 @@ const SetupList = ({ circuit, car, gamePath, onClose, userRole, installedSetups,
                             className="motion-blur-in"
                             style={{ animationDelay: `${idx * 0.1}s` }}
                         >
-                            <div className={`p-6 rounded-2xl border transition-all duration-500 group relative
+                            <div className={`p-5 rounded-lg border transition-all duration-300 group relative
                                 ${userFavorites.includes(setup.id) 
-                                    ? 'bg-racing-blue/10 border-racing-blue/40 shadow-[0_0_30px_rgba(0,112,243,0.1)]' 
-                                    : 'bg-white/[0.01] border-white/5 hover:border-white/20 hover:bg-white/[0.04]'}`}>
+                                    ? 'bg-wec-blue/5 border-wec-blue/20 shadow-[0_0_20px_rgba(0,144,255,0.05)]' 
+                                    : 'bg-white/[0.01] border-white/5 hover:border-white/10 hover:bg-white/[0.02]'}`}>
                                 
                                 <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-all">
                                     <div className="text-[8px] font-black text-racing-blue uppercase tracking-widest bg-racing-blue/10 px-2 py-1 rounded">ARCHIVO SVM</div>
@@ -310,12 +311,12 @@ const SetupList = ({ circuit, car, gamePath, onClose, userRole, installedSetups,
                 )}
             </div>
 
-            <footer className="p-6 bg-white/[0.01] border-t border-white/5 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3 text-zinc-600">
-                    <div className="w-1.5 h-1.5 rounded-full bg-racing-success animate-pulse" />
-                    <span className="text-[8px] font-black uppercase tracking-widest">Enlace Global Activo</span>
+            <footer className="p-4 bg-wec-void/50 border-t border-wec-border flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-wec-green wec-live-dot" />
+                    <span className="text-wec-display text-[7px] font-bold uppercase tracking-wider text-white/15">Link Active</span>
                 </div>
-                <div className="text-[8px] font-mono text-zinc-800 uppercase tracking-widest">Terminal MDT v3.0</div>
+                <div className="text-wec-display text-[7px] text-white/10 font-medium uppercase tracking-wider">MDT Terminal v4.0</div>
             </footer>
         </div>
     );

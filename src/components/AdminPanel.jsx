@@ -58,7 +58,7 @@ const TeamManagement = () => {
     };
 
     return (
-        <div className="space-y-8 max-w-2xl mx-auto p-4 bg-[#111] rounded-3xl border border-white/10 relative z-[100] pointer-events-auto">
+        <div className="space-y-6 max-w-2xl mx-auto p-4 bg-wec-void/80 rounded-xl border border-white/5 relative z-[100] pointer-events-auto">
             <div className="space-y-4">
                 <h3 className="text-white font-bold uppercase text-xs">Configuración Discord</h3>
                 <input 
@@ -339,20 +339,36 @@ const AdminPanel = ({ onClose, circuits, cars }) => {
         }
     };
 
-    const handleDeleteLeaderboardRecord = async (id) => {
-        if (!window.confirm("¿Seguro que quieres borrar este tiempo del Leaderboard Global? (Se ignorará permanentemente)")) return;
+    const handleDeleteLeaderboardRecord = async (record) => {
+        if (!window.confirm(`¿Seguro que quieres borrar el tiempo de ${record.name} (${record.bestLap.toFixed(3)}s) del Leaderboard Global? (Se ignorará permanentemente)`)) return;
         setLoading(true);
         try {
-            // Borrar de la tabla
-            await deleteDoc(doc(db, 'lmu_leaderboard', id));
+            // Normalización para bloqueo total
+            const circ = (record.circuit || '').trim().toLowerCase();
+            const cat = (record.category || '').trim().toLowerCase();
+            const name = (record.name || '').trim().toLowerCase();
+            const baseKey = `${circ}_${cat}_${name}`;
+
+            // 1. Borrar de la tabla principal
+            await deleteDoc(doc(db, 'lmu_leaderboard', record.id));
             
-            // Añadir a la lista de ignorados para que no se vuelva a sincronizar automáticamente
-            await setDoc(doc(db, 'ignored_records', id), {
+            // 2. Bloqueo de ID exacto
+            await setDoc(doc(db, 'ignored_records', record.id), {
                 deletedAt: new Date().toISOString(),
-                deletedBy: auth.currentUser?.email || 'Admin'
+                bestLap: record.bestLap,
+                reason: 'Deletion from Admin Panel',
+                type: 'specific'
             });
 
-            alert("✅ Tiempo eliminado e ignorado para futuras sincronizaciones");
+            // 3. Bloqueo de IDENTIDAD base (Para que no suba variantes)
+            await setDoc(doc(db, 'ignored_records', baseKey), {
+                deletedAt: new Date().toISOString(),
+                bestLap: record.bestLap,
+                reason: 'Identity block from Admin Panel',
+                type: 'base'
+            });
+
+            alert("✅ Tiempo eliminado e identidad bloqueada para futuras sincronizaciones");
         } catch (err) {
             console.error("Error deleting leaderboard record:", err);
             alert("❌ Error: " + err.message);
@@ -398,20 +414,21 @@ const AdminPanel = ({ onClose, circuits, cars }) => {
     };
 
     return (
-        <div className="w-full h-full bg-racing-carbon flex flex-col overflow-hidden">
+        <div className="w-full h-full bg-wec-carbon flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/20">
+                <div className="p-5 border-b border-wec-border flex items-center justify-between bg-wec-void/50">
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-racing-orange flex items-center justify-center text-white font-bold">A</div>
-                        <h2 className="text-xl font-bold tracking-tight text-white italic underline decoration-racing-orange decoration-2 underline-offset-4 uppercase">Panel de Administración</h2>
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-wec-orange to-wec-red flex items-center justify-center">
+                            <span className="text-wec-display text-[10px] text-white font-bold">A</span>
+                        </div>
+                        <h2 className="text-lg font-bold tracking-tight text-white uppercase" style={{fontFamily:'var(--font-body)'}}>Panel de <span className="text-wec-cyan">Administración</span></h2>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition text-zinc-500 hover:text-white">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition text-white/20 hover:text-white">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
 
-                {/* Tabs */}
-                <div className="flex bg-black/40 border-b border-white/5 p-1 gap-1">
+                <div className="flex bg-wec-void/80 border-b border-wec-border p-1 gap-0.5">
                     {['setups', 'circuits', 'cars', 'manage-setups', 'leaderboard', 'team'].map(tab => (
                         <button
                             key={tab}
@@ -425,20 +442,20 @@ const AdminPanel = ({ onClose, circuits, cars }) => {
                                     files: [], gameVersion: '', tags: [], engineerNotes: '' 
                                 });
                             }}
-                            className={`flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all
-                                ${activeTab === tab ? 'bg-white/10 text-racing-orange' : 'text-zinc-500 hover:text-white hover:bg-white/5'}`}
+                            className={`flex-1 py-2.5 text-wec-display text-[8px] font-bold uppercase tracking-wider transition-all rounded-md
+                                ${activeTab === tab ? 'bg-wec-blue/10 text-wec-cyan border border-wec-blue/20' : 'text-white/25 hover:text-white/50 border border-transparent'}`}
                         >
-                            {tab === 'setups' ? 'Subir Setups' :
-                                tab === 'manage-setups' ? 'Gestionar Setups' :
+                            {tab === 'setups' ? 'Subir' :
+                                tab === 'manage-setups' ? 'Gestionar' :
                                     tab === 'circuits' ? 'Circuitos' : 
-                                        tab === 'leaderboard' ? 'Leaderboard' : 
-                                            tab === 'team' ? 'Equipo & Discord' : 'Vehículos'}
+                                        tab === 'leaderboard' ? 'Records' : 
+                                            tab === 'team' ? 'Equipo' : 'Coches'}
                         </button>
                     ))}
                 </div>
 
                 {/* Form Content */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 relative z-10">
+                <div className="flex-1 overflow-y-auto wec-scrollbar p-6 relative z-10">
                     {activeTab === 'manage-setups' && (
                         <div className="space-y-4 relative z-20">
                             <div className="flex items-center justify-between mb-6">
@@ -742,7 +759,7 @@ const AdminPanel = ({ onClose, circuits, cars }) => {
                                                 </td>
                                                 <td className="px-4 py-3 text-right">
                                                     <button 
-                                                        onClick={() => handleDeleteLeaderboardRecord(record.id)}
+                                                        onClick={() => handleDeleteLeaderboardRecord(record)}
                                                         className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-colors text-[9px] font-bold uppercase"
                                                     >
                                                         Borrar

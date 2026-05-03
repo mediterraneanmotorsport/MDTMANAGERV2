@@ -267,42 +267,42 @@ const SetupTweaker = ({ gamePath }) => {
     return (
         <div className="p-8 max-w-4xl mx-auto pb-24">
             <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 rounded-2xl bg-racing-blue/10 flex items-center justify-center border border-racing-blue/30 shadow-[0_0_15px_rgba(0,112,243,0.2)]">
-                    <span className="text-2xl text-racing-blue italic font-black">AI</span>
+                <div className="w-11 h-11 rounded-lg bg-wec-blue/10 flex items-center justify-center border border-wec-blue/20">
+                    <span className="text-wec-display text-lg text-wec-cyan font-bold">AI</span>
                 </div>
                 <div>
-                    <h2 className="text-2xl font-black text-white italic tracking-tighter uppercase">MDT AI Race Engineer</h2>
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Corrección de setups mediante algoritmos de ingeniería</p>
+                    <h2 className="text-2xl font-bold text-white uppercase tracking-tight" style={{fontFamily:'var(--font-body)'}}>MDT AI <span className="text-wec-cyan">Race Engineer</span></h2>
+                    <p className="text-wec-display text-[8px] text-white/25 font-medium uppercase tracking-wider mt-1">Corrección de setups mediante algoritmos</p>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Panel Izquierdo: Selección de Archivo */}
-                <div className="space-y-6 bg-black/40 p-6 rounded-3xl border border-white/5 backdrop-blur-sm">
+                <div className="space-y-6 bg-wec-void/50 p-6 rounded-lg border border-white/5">
                     <div className="space-y-4">
-                        <div className="flex gap-2 p-1 bg-black/40 rounded-xl border border-white/5 mb-2">
+                        <div className="flex gap-1 p-1 bg-wec-black/60 rounded-lg border border-white/5 mb-2">
                             <button 
                                 onClick={() => setVehicleType('GT3')}
-                                className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all
-                                    ${vehicleType === 'GT3' ? 'bg-racing-blue text-white' : 'text-zinc-500 hover:text-white'}`}
+                                className={`flex-1 py-2 rounded-md text-wec-display text-[8px] font-bold uppercase tracking-wider transition-all
+                                    ${vehicleType === 'GT3' ? 'bg-wec-blue/20 text-wec-cyan border border-wec-blue/20' : 'text-white/25 hover:text-white/50 border border-transparent'}`}
                             >
                                 GT3 Class
                             </button>
                             <button 
                                 onClick={() => setVehicleType('Hypercar')}
-                                className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all
-                                    ${vehicleType === 'Hypercar' ? 'bg-racing-orange text-white' : 'text-zinc-500 hover:text-white'}`}
+                                className={`flex-1 py-2 rounded-md text-wec-display text-[8px] font-bold uppercase tracking-wider transition-all
+                                    ${vehicleType === 'Hypercar' ? 'bg-wec-gold/15 text-wec-gold border border-wec-gold/20' : 'text-white/25 hover:text-white/50 border border-transparent'}`}
                             >
                                 Hypercar
                             </button>
                         </div>
 
                         <div>
-                            <label className="block text-[9px] uppercase font-bold text-zinc-600 mb-2 tracking-widest">1. Seleccionar Circuito</label>
+                            <label className="block wec-label mb-2">1. Seleccionar Circuito</label>
                             <select 
                                 value={selectedCircuit}
                                 onChange={(e) => setSelectedCircuit(e.target.value)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-racing-blue transition-all"
+                                className="w-full bg-wec-void/80 border border-white/5 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-wec-blue/30 transition-all"
                             >
                                 <option value="" className="bg-zinc-900">Seleccionar...</option>
                                 {circuits.map(c => <option key={c} value={c} className="bg-zinc-900">{c}</option>)}
@@ -310,7 +310,7 @@ const SetupTweaker = ({ gamePath }) => {
                         </div>
 
                         <div>
-                            <label className="block text-[9px] uppercase font-bold text-zinc-600 mb-2 tracking-widest">2. Seleccionar Coche</label>
+                            <label className="block wec-label mb-2">2. Seleccionar Coche</label>
                             <select 
                                 value={selectedCar}
                                 disabled={!selectedCircuit}
@@ -323,7 +323,7 @@ const SetupTweaker = ({ gamePath }) => {
                         </div>
 
                         <div>
-                            <label className="block text-[9px] uppercase font-bold text-zinc-600 mb-2 tracking-widest">3. Setup Base a Corregir</label>
+                            <label className="block wec-label mb-2">3. Setup Base a Corregir</label>
                             <select 
                                 value={selectedSetup}
                                 disabled={!selectedCar}
@@ -338,7 +338,7 @@ const SetupTweaker = ({ gamePath }) => {
                 </div>
 
                 {/* Panel Derecho: Diagnóstico */}
-                <div className="space-y-6 bg-black/40 p-6 rounded-3xl border border-white/5 backdrop-blur-sm">
+                <div className="space-y-6 bg-wec-void/50 p-6 rounded-lg border border-white/5">
                     <div>
                         <label className="block text-[9px] uppercase font-bold text-zinc-600 mb-4 tracking-widest">4. Diagnóstico del Piloto</label>
                         <div className="grid grid-cols-1 gap-2">
@@ -381,7 +381,7 @@ const SetupTweaker = ({ gamePath }) => {
                 <button
                     onClick={handleTweak}
                     disabled={loading || !selectedSetup || !problem}
-                    className="relative group px-12 py-5 rounded-2xl bg-racing-blue text-white font-black italic uppercase tracking-tighter overflow-hidden transition-all disabled:opacity-50 disabled:grayscale"
+                    className="relative group px-12 py-4 rounded-lg bg-gradient-to-r from-wec-blue to-wec-blue/80 text-white text-wec-display text-sm font-bold uppercase tracking-wider overflow-hidden transition-all disabled:opacity-30 hover:shadow-[0_0_30px_rgba(0,144,255,0.3)]"
                 >
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     <span className="relative flex items-center gap-3">

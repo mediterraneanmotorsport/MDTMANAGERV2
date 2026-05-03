@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, addDoc, getDocs, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, collection, query, where, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase/config';
 import Dashboard from './components/Dashboard';
-import SplashScreen from './components/SplashScreen';
 import Login from './components/Login';
 import VideoIntro from './components/VideoIntro';
+import UpdateNotification from './components/UpdateNotification';
 
 function App() {
   const [showIntro, setShowIntro] = useState(true);
-  const [showSplash, setShowSplash] = useState(false);
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
   const [accessError, setAccessError] = useState(null);
@@ -25,7 +24,6 @@ function App() {
   const [gamePath, setGamePath] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
-  const [updateStatus, setUpdateStatus] = useState(null);
 
   const handleSelectPath = async () => {
     if (window.electronAPI) {
@@ -158,57 +156,6 @@ function App() {
     return () => unsubRemote();
   }, [user, gamePath]);
 
-  // Telemetry Sync Engine
-  useEffect(() => {
-    if (!user || !gamePath || !window.electronAPI || circuits.length === 0) return;
-
-    window.electronAPI.startTelemetryWatcher({ gamePath });
-
-    const unsubscribe = window.electronAPI.onTelemetryUpdate(async (data) => {
-      console.log("Telemetry Engine: New Session Data", data);
-      
-      // 1. Find matching circuit in our DB
-      const venue = data.circuit.toLowerCase();
-      const match = circuits.find(c => 
-        venue.includes(c.name.toLowerCase()) || 
-        c.name.toLowerCase().includes(venue)
-      );
-
-      if (!match) {
-          console.warn("Telemetry Engine: Could not match circuit", data.circuit);
-          return;
-      }
-
-      // 2. Process results (upload best laps)
-      for (const res of data.results) {
-          // Unique ID for the entry per user/circuit/car to avoid duplicates and only keep best
-          const entryId = `${match.id}_${res.car.replace(/\s+/g, '_')}_${res.name.replace(/\s+/g, '_')}`;
-          
-          try {
-              // Check if we should update (only if it's a better time)
-              const leaderRef = doc(db, 'leaderboard', entryId);
-              
-              await setDoc(leaderRef, {
-                  circuitId: match.id,
-                  circuitName: match.name,
-                  userName: res.name,
-                  carModel: res.car,
-                  lapTime: res.bestLap,
-                  setupName: res.currentSetup,
-                  trackTemp: data.trackTemp,
-                  timestamp: serverTimestamp(),
-                  date: new Date().toLocaleDateString()
-              }, { merge: true }); // Merge for now, could add logic to only update if faster
-          } catch (err) {
-              console.error("Telemetry Engine: Upload error", err);
-          }
-      }
-    });
-
-    return () => {
-        // No easy way to unsub from IPC on cleanup in this helper but we should be fine
-    };
-  }, [user, gamePath, circuits]);
 
   // Keyboard Shortcuts (F11 for Fullscreen)
   useEffect(() => {
@@ -222,82 +169,87 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Update Listeners
-  useEffect(() => {
-    if (!window.electronAPI) return;
-    
-    window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateStatus({ type: 'available', version: info.version });
-    });
-
-    window.electronAPI.onUpdateReady((info) => {
-      setUpdateStatus({ type: 'ready', version: info.version });
-    });
-  }, []);
-
+  // ── LOADING SCREEN (WEC 2030 Holographic) ──
   if (loading || authLoading) {
     return (
-        <div className="h-screen w-full bg-racing-black flex flex-col items-center justify-center p-8 relative overflow-hidden">
-            <div className="absolute inset-0 racing-stripes opacity-10 animate-pulse" />
-            <div className="relative z-10 flex flex-col items-center">
-                <img src="logo.png" alt="MDT" className="w-32 h-auto mb-12 drop-shadow-[0_0_30px_rgba(0,112,243,0.5)] animate-pulse" />
-                <div className="w-64 h-1 bg-white/5 rounded-full overflow-hidden mb-4">
-                    <div className="w-1/3 h-full bg-racing-blue shimmer-bg" />
-                </div>
-                <div className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.5em] animate-pulse">Telemetry Uplink...</div>
-            </div>
+      <div className="h-screen w-full bg-wec-black flex flex-col items-center justify-center p-8 relative overflow-hidden">
+        {/* Background effects */}
+        <div className="absolute inset-0 wec-grid-pattern opacity-30" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-wec-blue/5 blur-[150px] rounded-full" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-wec-cyan/5 blur-[100px] rounded-full animate-pulse" />
+        
+        <div className="relative z-10 flex flex-col items-center">
+          <img src="logo.png" alt="MDT" className="w-28 h-auto mb-10 drop-shadow-[0_0_40px_rgba(0,144,255,0.4)]" style={{ animation: 'pulseBlue 3s ease-in-out infinite' }} />
+          
+          {/* WEC-style loading bar */}
+          <div className="w-72 h-[2px] bg-white/5 rounded-full overflow-hidden mb-6 relative">
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-wec-cyan to-transparent animate-pulse" style={{ animation: 'wecShimmer 2s linear infinite' }} />
+          </div>
+          
+          <div className="text-wec-display text-[9px] text-wec-cyan/60 font-bold uppercase tracking-[0.5em]">
+            Establishing Telemetry Uplink
+          </div>
+          <div className="text-wec-display text-[7px] text-white/20 font-medium uppercase tracking-[0.3em] mt-2">
+            MDT MOTORSPORT TERMINAL v4.0
+          </div>
         </div>
+
+        {/* Corner brackets */}
+        <div className="absolute top-8 left-8 w-8 h-8 border-l border-t border-wec-cyan/20" />
+        <div className="absolute top-8 right-8 w-8 h-8 border-r border-t border-wec-cyan/20" />
+        <div className="absolute bottom-8 left-8 w-8 h-8 border-l border-b border-wec-cyan/20" />
+        <div className="absolute bottom-8 right-8 w-8 h-8 border-r border-b border-wec-cyan/20" />
+      </div>
     );
   }
 
   return (
-    <div className="w-screen h-screen bg-racing-black text-white overflow-hidden flex flex-col font-sans selection:bg-racing-blue selection:text-white">
+    <div className="w-screen h-screen bg-wec-black text-wec-white overflow-hidden flex flex-col" style={{ fontFamily: 'var(--font-body)' }}>
       {showIntro ? (
         <VideoIntro onFinish={() => setShowIntro(false)} />
-      ) : showSplash ? (
-        <SplashScreen onFinish={() => setShowSplash(false)} />
       ) : !user ? (
         <Login error={accessError} />
       ) : (
         <>
-          <div className="h-8 w-full bg-racing-black draggable border-b border-white/5 flex items-center px-4 select-none shrink-0 z-[1000]">
-            <span className="text-[10px] font-black tracking-widest text-zinc-500 italic">
-              ENGINE <span className="text-racing-blue">MDT</span> • <span className="text-racing-orange ml-1">TERMINAL v3.0</span>
-            </span>
-            <div className="ml-auto no-drag flex items-center gap-4">
+          {/* ── WEC TOP BAR (Title Bar) ── */}
+          <div className="h-9 w-full bg-wec-void/90 draggable border-b border-wec-border flex items-center px-4 select-none shrink-0 z-[1000] relative overflow-hidden">
+            {/* Subtle animated gradient stripe */}
+            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-wec-blue/30 to-transparent" />
+            
+            <div className="flex items-center gap-3">
+              <div className="w-1.5 h-4 bg-wec-blue" />
+              <span className="text-wec-display text-[9px] font-bold tracking-[0.3em] text-white/50">
+                MDT<span className="text-wec-cyan ml-1">WEC</span>
+              </span>
+              <span className="text-wec-display text-[7px] text-white/20 font-medium tracking-wider">TERMINAL v4.0</span>
+            </div>
+
+            <div className="ml-auto no-drag flex items-center gap-3">
+              {/* Live Status Indicator */}
+              <div className="flex items-center gap-2 px-3 py-1 rounded bg-wec-green/5 border border-wec-green/10">
+                <div className="w-1.5 h-1.5 rounded-full bg-wec-green wec-live-dot" />
+                <span className="text-wec-display text-[7px] font-bold text-wec-green/80 uppercase tracking-wider">Live</span>
+              </div>
+
               <button 
-                onClick={() => window.electronAPI.toggleFullScreen()}
-                className="p-1 hover:bg-white/10 rounded transition-all group"
-                title="Alternar Pantalla Completa"
+                onClick={() => window.electronAPI?.toggleFullScreen()}
+                className="p-1.5 hover:bg-white/5 rounded transition-all group"
+                title="Toggle Fullscreen"
               >
-                <svg className="w-3 h-3 text-zinc-500 group-hover:text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg className="w-3 h-3 text-white/30 group-hover:text-wec-cyan transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                 </svg>
               </button>
-              <span className="text-[9px] px-2 py-0.5 rounded border border-racing-blue/30 text-racing-blue font-black uppercase tracking-[0.2em]">{role}</span>
-              <div className="w-1.5 h-1.5 rounded-full bg-racing-success shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+
+              <div className="h-4 w-px bg-white/5" />
+
+              <span className="text-wec-display text-[7px] px-2 py-0.5 rounded border border-wec-gold/30 text-wec-gold font-bold uppercase tracking-wider">
+                {role}
+              </span>
             </div>
           </div>
-          
-          {updateStatus && (
-            <div className={`h-10 w-full flex items-center justify-between px-6 animate-in slide-in-from-top duration-500 z-50 ${updateStatus.type === 'ready' ? 'bg-racing-success/20 border-b border-racing-success/30' : 'bg-racing-blue/20 border-b border-racing-blue/30'}`}>
-              <div className="flex items-center gap-3">
-                <div className={`w-2 h-2 rounded-full animate-pulse ${updateStatus.type === 'ready' ? 'bg-racing-success' : 'bg-racing-blue'}`} />
-                <span className="text-[10px] font-black uppercase tracking-widest text-white">
-                  {updateStatus.type === 'ready' ? `¡ACTUALIZACIÓN LISTA! (v${updateStatus.version})` : `DESCARGANDO NUEVA VERSIÓN... (v${updateStatus.version})`}
-                </span>
-              </div>
-              {updateStatus.type === 'ready' && (
-                <button 
-                  onClick={() => window.electronAPI.installUpdate()}
-                  className="bg-white text-black px-4 py-1 rounded text-[9px] font-black uppercase tracking-widest hover:bg-racing-success hover:text-white transition-all shadow-lg"
-                >
-                  Reiniciar y Actualizar
-                </button>
-              )}
-            </div>
-          )}
 
+          {/* ── MAIN CONTENT ── */}
           <div className="flex-1 overflow-hidden relative">
             <Dashboard 
                 userRole={role} 
@@ -311,6 +263,9 @@ function App() {
                 isDataLoaded={dataLoaded}
             />
           </div>
+
+          {/* ── AUTO-UPDATE OVERLAY ── */}
+          <UpdateNotification />
         </>
       )}
     </div>

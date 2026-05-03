@@ -1,7 +1,7 @@
 {
   "name": "mdt-setup-manager",
   "private": true,
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "MDT Setup Manager for Le Mans Ultimate",
   "author": "Team MDT",
   "type": "module",
@@ -36,9 +36,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": "nsis",
       "icon": "public/logo.png"
     },
     "nsis": {
@@ -54,6 +52,7 @@
     "@capacitor/core": "^8.0.1",
     "@capacitor/ios": "^8.0.1",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.8.3",
     "firebase": "^12.8.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

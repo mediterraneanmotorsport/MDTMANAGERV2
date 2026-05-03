@@ -44,6 +44,7 @@ const getCategoryLogo = (catName) => {
 const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCategory }) => {
     const [entries, setEntries] = useState([]);
     const [teamMembers, setTeamMembers] = useState(new Set());
+    const [localPlayerName, setLocalPlayerName] = useState(null);
     const [loading, setLoading] = useState(true);
     const [filterCircuit, setFilterCircuit] = useState('ALL');
     const [filterCategory, setFilterCategory] = useState('ALL');
@@ -58,9 +59,9 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
     const getCategory = (modelStr) => {
         if (!modelStr) return 'OTRO';
         const upper = modelStr.toUpperCase();
-        if (upper.includes('HYPER') || upper.includes('LMH') || upper.includes('LMDH') || upper.includes('HY') || 
+        if (upper.includes('HYPER') || upper.includes('LMH') || upper.includes('LMDH') || upper.includes('HY') ||
             upper.includes('GLICKENHAUS') || upper.includes('ISOTTA') || upper.includes('VANWALL') || upper.includes('GENESIS') ||
-            upper.includes('TOYOTA') || upper.includes('PEUGEOT') || upper.includes('CADILLAC') || 
+            upper.includes('TOYOTA') || upper.includes('PEUGEOT') || upper.includes('CADILLAC') ||
             upper.includes('499P') || upper.includes('963') || upper.includes('ALPINE') || upper.includes('SC63') || upper.includes('V-SERIES.R')) return 'HYPERCAR';
         if (upper.includes('GT3') || upper.includes('LMGT3')) return 'GT3';
         if (upper.includes('GTE')) return 'GTE';
@@ -84,180 +85,202 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
             }
 
             try {
-                const allLaps = await window.electronAPI.scanLocalTelemetry({ gamePath });
-                const localBests = {};
-                allLaps.forEach(lap => {
-                    const category = getCategory(lap.car);
-                    const version = lap.gameVersion || 'Unknown';
-                    const key = `${lap.circuit}_${category}_${lap.name}_${version}`;
-                    if (!localBests[key] || lap.bestLap < localBests[key].bestLap) {
-                        localBests[key] = { ...lap, category, version, key };
-                    }
-                });
+                // 1. Funciones de Identidad Unificada
+                const getIdentityBase = (lap) => {
+                    const circ = (lap.circuit || '').replace(/\s+/g, '').toLowerCase();
+                    const cat = getCategory(lap.car).replace(/\s+/g, '').toLowerCase();
+                    const name = (lap.name || '').replace(/\s+/g, '').toLowerCase();
+                    return `${circ}_${cat}_${name}`;
+                };
 
-                setEntries(Object.values(localBests));
-                setLoading(false);
+                const getIdentityKey = (lap) => {
+                    const base = getIdentityBase(lap);
+                    const rawVer = (lap.gameVersion || 'Unknown').trim();
+                    const verMatch = rawVer.match(/^(\d+\.\d)/);
+                    let ver = verMatch ? verMatch[1] : 'Unknown';
+                    if (ver === '1.3' || ver === 'Unknown') ver = '1.3000';
+                    return `${base}_${ver}`;
+                };
 
-                const [leaderboardSnap, settingsSnap, membersSnap, ignoredSnap] = await Promise.all([
+                // 2. Carga de Datos (Prioridad Cloud para la UI)
+                const [cloudSnap, settingsSnap, membersSnap, ignoredSnap, allLocal] = await Promise.all([
                     getDocs(collection(db, "lmu_leaderboard")),
                     getDoc(doc(db, "settings", "discord")),
                     getDocs(collection(db, "mdt_members")),
-                    getDocs(collection(db, "ignored_records"))
+                    getDocs(collection(db, "ignored_records")),
+                    window.electronAPI.scanLocalTelemetry({ gamePath })
                 ]);
 
-                const cloudBests = {};
-                leaderboardSnap.forEach((doc) => {
-                    cloudBests[doc.id] = { ...doc.data(), key: doc.id };
+                const webhook = settingsSnap.exists() ? settingsSnap.data().url : null;
+                const membersSet = new Set(membersSnap.docs.map(d => d.data().name.trim().toLowerCase()));
+                const ignoredSet = new Set(ignoredSnap.docs.map(d => d.id));
+
+                console.log(`MDT Leaderboard: [INIT] Miembros cargados: ${membersSet.size} | Registros locales: ${allLocal?.length || 0}`);
+
+                setTeamMembers(membersSet);
+                setIgnoredRecords(ignoredSet);
+
+                // 3. Preparar lista inteligente de ignorados (POR TIEMPO O ID)
+                const ignoredTimesMap = {};
+                ignoredSnap.forEach(doc => {
+                    ignoredTimesMap[doc.id] = doc.data().bestLap;
                 });
 
-                const ignoredIds = new Set(ignoredSnap.docs.map(d => d.id));
-                setIgnoredRecords(ignoredIds);
+                // 4. Procesar Datos de la NUBE con Consolidación Extrema
+                const cloudMap = {};
+                cloudSnap.forEach((doc) => {
+                    const data = doc.data();
+                    const key = doc.id;
 
-                const webhookUrl = settingsSnap.exists() ? settingsSnap.data().url : null;
-                const mdtMembersList = membersSnap.docs.map(d => d.data().name.toLowerCase());
-                const mdtMembersSet = new Set(mdtMembersList);
-                setTeamMembers(mdtMembersSet);
+                    // Normalización de versión
+                    const rawVer = (data.gameVersion || 'Unknown').trim();
+                    const verMatch = rawVer.match(/^(\d+\.\d)/);
+                    let cleanVer = verMatch ? verMatch[1] : 'Unknown';
+                    if (cleanVer === '1.3' || cleanVer === 'Unknown') cleanVer = '1.3000';
+                    data.gameVersion = cleanVer;
 
-                const finalBests = { ...localBests };
-                for (const key in cloudBests) {
-                    const cloudLap = cloudBests[key];
-                    // Lógica Anti-Duplicados: Si ya tenemos una versión mejor local o viceversa
-                    if (!finalBests[key] || cloudLap.bestLap < finalBests[key].bestLap) {
-                        finalBests[key] = cloudLap;
+                    // Identidad Universal
+                    const identityBase = getIdentityBase(data);
+
+                    // Filtro de Seguridad: ¿Está en la lista negra?
+                    const ignoredByTime = ignoredTimesMap[identityBase] || ignoredTimesMap[key];
+                    const isTimeIgnored = ignoredByTime && Math.abs(data.bestLap - ignoredByTime) < 0.001;
+
+                    if (ignoredSet.has(key) || isTimeIgnored) return;
+
+                    const existing = cloudMap[identityBase];
+                    const isNewFaster = !existing || Number(data.bestLap) < Number(existing.bestLap);
+                    const isEqualButBetterVersion = existing && Number(data.bestLap) === Number(existing.bestLap) && data.gameVersion !== 'Unknown' && existing.gameVersion === 'Unknown';
+
+                    if (isNewFaster || isEqualButBetterVersion) {
+                        if (existing && data.bestLap !== existing.bestLap) {
+                            console.log(`MDT Sync: [CONSOLIDACIÓN] Fusionando tiempos de ${data.name}. Manteniendo ${data.bestLap} sobre ${existing.bestLap}`);
+                        }
+                        cloudMap[identityBase] = { ...data, key };
                     }
-                }
-
-                // LIMPIEZA DE MIGRACIÓN: Eliminar duplicados "huérfanos" (sin versión)
-                const deduplicated = {};
-                const recordsWithVersion = Object.values(finalBests).filter(l => l.gameVersion && l.gameVersion !== 'Unknown');
-                const recordsUnknown = Object.values(finalBests).filter(l => !l.gameVersion || l.gameVersion === 'Unknown');
-
-                // 1. Añadimos todos los que tienen versión (son los buenos)
-                recordsWithVersion.forEach(lap => {
-                    deduplicated[lap.key] = lap;
                 });
 
-                // 2. Añadimos los "Unknown" solo si no hay ya un registro para ese piloto/circuito/cat
-                recordsUnknown.forEach(lap => {
-                    const baseKey = `${lap.circuit}_${lap.category}_${lap.name}`;
-                    const alreadyHasDetailed = recordsWithVersion.some(r => 
-                        r.circuit === lap.circuit && 
-                        r.category === lap.category && 
-                        r.name === lap.name
-                    );
-                    
-                    if (!alreadyHasDetailed) {
-                        deduplicated[lap.key] = lap;
+                const finalCloudEntries = Object.values(cloudMap);
+                console.log(`MDT Leaderboard: Mostrando ${finalCloudEntries.length} récords consolidados.`);
+                setEntries(finalCloudEntries);
+                setLoading(false);
+
+                // 5. Motor de Actualización (Background)
+                const processLap = async (lap, circuitName) => {
+                    const fullLap = { ...lap, circuit: circuitName || lap.circuit };
+                    const key = getIdentityKey(fullLap);
+                    const baseKey = getIdentityBase(fullLap);
+
+                    // COMPROBACIÓN INTELIGENTE DE IGNORADOS
+                    // Bloqueamos si coincide el ID exacto O si coincide la identidad base + el tiempo
+                    const isSpecificIgnored = ignoredSet.has(key);
+                    const ignoredTime = ignoredTimesMap[baseKey] || ignoredTimesMap[key];
+                    const isTimeIgnored = ignoredTime && Math.abs(lap.bestLap - ignoredTime) < 0.001;
+
+                    // Identificar al jugador local para el resaltado UI
+                    if (lap.isPlayer && lap.name && !localPlayerName) {
+                        setLocalPlayerName(lap.name);
                     }
-                });
-                
-                setEntries(Object.values(deduplicated));
 
-                // Función interna para procesar una vuelta (subir y notificar)
-                const processLapUpdate = async (lap, currentCloudBests) => {
-                    const category = getCategory(lap.car);
-                    const version = lap.gameVersion || 'Unknown';
-                    const key = `${lap.circuit}_${category}_${lap.name}_${version}`;
-                    
-                    if (ignoredIds.has(key)) return;
+                    if (isSpecificIgnored || isTimeIgnored) {
+                        console.log(`MDT Sync: [SKIP] ${lap.name} en ${fullLap.circuit} - Tiempo ${lap.bestLap} ignorado.`);
+                        return;
+                    }
 
-                    const cloudLap = currentCloudBests[key];
+                    const existingCloud = cloudMap[baseKey]; // USAR BASEKEY PARA EVITAR SUBIDAS INFINITAS
                     const hasLocalSectors = lap.sectors && (lap.sectors.s1 > 0 || lap.sectors.s2 > 0 || lap.sectors.s3 > 0);
-                    const cloudMissingSectors = !cloudLap?.sectors || (cloudLap.sectors.s1 === 0 && cloudLap.sectors.s2 === 0);
 
-                    // SUBIR SI: No existe OR Mejor tiempo OR Faltan sectores
-                    if (!cloudLap || lap.bestLap < cloudLap.bestLap || (hasLocalSectors && cloudMissingSectors)) {
-                        await setDoc(doc(db, "lmu_leaderboard", key), {
-                            circuit: lap.circuit,
-                            category: category,
+                    // Normalización de versión para la comparación
+                    const rawVersion = (lap.gameVersion || 'Unknown').trim();
+                    const verMatch = rawVersion.match(/^(\d+\.\d)/);
+                    let cleanVersion = verMatch ? verMatch[1] : 'Unknown';
+                    if (cleanVersion === '1.3' || cleanVersion === 'Unknown') cleanVersion = '1.3000';
+
+                    console.log(`MDT Sync: [CHECK] ${lap.name} | Local: ${lap.bestLap} | Cloud: ${existingCloud?.bestLap || 'Ninguno'}`);
+
+                    // REGLA DE ORO: El tiempo más rápido MANDA. 
+                    // No permitimos que un tiempo lento sobrescriba a uno rápido por tener sectores.
+                    const isFaster = !existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001;
+                    const isSameTimeButBetterData = existingCloud &&
+                        Math.abs(Number(lap.bestLap) - Number(existingCloud.bestLap)) < 0.001 &&
+                        hasLocalSectors && (!existingCloud.sectors || existingCloud.sectors.s1 === 0);
+
+                    if (isFaster || isSameTimeButBetterData) {
+                        const uploadData = {
+                            circuit: fullLap.circuit,
+                            category: getCategory(lap.car),
                             car: lap.car,
-                            name: lap.name,
-                            bestLap: lap.bestLap,
+                            name: lap.name.trim(),
+                            bestLap: Number(lap.bestLap),
                             sectors: lap.sectors || { s1: 0, s2: 0, s3: 0 },
                             topSpeed: lap.topSpeed || '0',
-                            gameVersion: version,
-                            date: lap.date || new Date().toISOString()
-                        });
+                            gameVersion: cleanVersion,
+                            date: new Date().toISOString()
+                        };
 
-                        // Notificar si es miembro y es una MEJORA REAL de tiempo
-                        const isMember = mdtMembersSet.has(lap.name.toLowerCase());
-                        const notificationKey = `${key}_${lap.bestLap}`; // Llave única por tiempo para permitir mejoras
+                        console.log(`MDT Sync: [UPLOAD] Subiendo mejora de ${name}: ${lap.bestLap}s`);
+                        await setDoc(doc(db, "lmu_leaderboard", key), uploadData);
+                        cloudMap[baseKey] = { ...uploadData, key };
 
-                        if (isMember && webhookUrl && !sentNotifications.current.has(notificationKey)) {
-                            if (!cloudLap || lap.bestLap < cloudLap.bestLap) {
-                                sentNotifications.current.add(notificationKey);
-                                sendDiscordNotification(webhookUrl, {
-                                    pilot: lap.name,
-                                    circuit: lap.circuit,
-                                    car: lap.car,
-                                    lapTime: lap.bestLap,
-                                    category: category,
-                                    improvement: cloudLap ? cloudLap.bestLap - lap.bestLap : 0
+                        // Notificación Discord (SOLO SI ES MEJORA REAL SOBRE TODO LO QUE TENEMOS)
+                        const currentBest = cloudMap[baseKey]?.bestLap || Infinity;
+                        if (membersSet.has(lap.name.trim().toLowerCase()) && webhook && Number(lap.bestLap) < Number(currentBest) + 0.001) {
+                            // Solo enviamos si realmente estamos mejorando el récord absoluto que tiene la app en este momento
+                            if (!existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001) {
+                                sendDiscordNotification(webhook, {
+                                    pilot: lap.name, circuit: fullLap.circuit, car: lap.car,
+                                    lapTime: lap.bestLap, category: uploadData.category,
+                                    improvement: existingCloud ? existingCloud.bestLap - lap.bestLap : 0
                                 });
                             }
                         }
                     }
                 };
 
-                // Procesar carga inicial
-                for (const key in localBests) {
-                    const lap = localBests[key];
-                    const isMember = mdtMembersSet.has(lap.name.toLowerCase());
-                    if (lap.isPlayer || isMember) {
-                        await processLapUpdate(lap, cloudBests);
+                // Sincronizar logs históricos en segundo plano (Secuencial para evitar saturación)
+                // 5. Motor de Sincronización Histórica (Primeros 30 archivos)
+                const syncHistory = async () => {
+                    if (!allLocal || allLocal.length === 0) {
+                        console.log("MDT Sync: No se encontraron registros locales recientes.");
+                    } else {
+                        console.log(`MDT Sync: Iniciando escaneo de ${allLocal.length} archivos locales...`);
+                        for (const l of allLocal) {
+                            const pilotName = (l.name || '').toLowerCase().trim();
+                            const isMember = membersSet.has(pilotName);
+                            const shouldProcess = l.isPlayer || isMember;
+
+                            if (shouldProcess) {
+                                await processLap(l);
+                            }
+                        }
                     }
-                }
 
-                // ESCUCHAR ACTUALIZACIONES EN TIEMPO REAL
+                    const finalEntries = Object.values(cloudMap);
+                    console.log(`MDT Sync: Sincronización finalizada. UI actualizada.`);
+                    setEntries(finalEntries);
+                    setLoading(false);
+                };
+
+                await syncHistory();
+
+                // 6. Listener de Telemetría en Tiempo Real
                 if (window.electronAPI.onTelemetryUpdate) {
-                    window.electronAPI.onTelemetryUpdate(async (data) => {
-                        console.log("MDT Link: Recibida actualización en tiempo real", data);
-                        const { circuit, results } = data;
-                        
-                        setEntries(prev => {
-                            const combined = [...prev];
-                            let updated = false;
-
-                            results.forEach(lap => {
-                                const category = getCategory(lap.car);
-                                const version = lap.gameVersion || 'Unknown';
-                                const key = `${circuit}_${category}_${lap.name}_${version}`;
-                                const isMember = mdtMembersSet.has(lap.name.toLowerCase());
-                                
-                                const idx = combined.findIndex(e => e.key === key);
-                                if (idx === -1) {
-                                    combined.push({ ...lap, circuit, category, version, key });
-                                    updated = true;
-                                } else if (lap.bestLap < combined[idx].bestLap) {
-                                    combined[idx] = { ...lap, circuit, category, version, key };
-                                    updated = true;
-                                }
-
-                                if (lap.isPlayer || isMember) {
-                                    processLapUpdate({ ...lap, circuit, category, version, key }, cloudBests);
-                                }
-                            });
-
-                            if (!updated) return prev;
-
-                            // Aplicar deduplicación inteligente al estado final
-                            const finalMap = {};
-                            const withVer = combined.filter(l => l.gameVersion && l.gameVersion !== 'Unknown');
-                            const unkVer = combined.filter(l => !l.gameVersion || l.gameVersion === 'Unknown');
-
-                            withVer.forEach(l => finalMap[l.key] = l);
-                            unkVer.forEach(l => {
-                                const hasDetailed = withVer.some(r => r.circuit === l.circuit && r.category === l.category && r.name === l.name);
-                                if (!hasDetailed) finalMap[l.key] = l;
-                            });
-
-                            return Object.values(finalMap);
-                        });
+                    window.electronAPI.onTelemetryUpdate(async data => {
+                        console.log("MDT Sync: Nueva telemetría en pista...");
+                        for (const lap of data.results) {
+                            const pilotName = (lap.name || '').toLowerCase().trim();
+                            const isMember = membersSet.has(pilotName);
+                            if (lap.isPlayer || isMember) {
+                                await processLap(lap, data.circuit);
+                            }
+                        }
+                        setEntries(Object.values(cloudMap));
                     });
                 }
 
             } catch (err) {
-                console.error("Error syncing telemetry", err);
+                console.error("Critical Sync Failure", err);
+                setLoading(false);
             }
         };
         syncAndLoadTelemetry();
@@ -267,6 +290,16 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
         const circuits = new Set(entries.map(e => e.circuit));
         return Array.from(circuits).sort();
     }, [entries]);
+
+    // Auto-seleccionar el primer circuito disponible al cargar datos
+    // Evita renderizar todos los circuitos a la vez (performance) y muestra datos inmediatamente
+    const hasAutoSelected = useRef(false);
+    useEffect(() => {
+        if (!hasAutoSelected.current && availableCircuits.length > 0) {
+            hasAutoSelected.current = true;
+            setFilterCircuit(availableCircuits[0]);
+        }
+    }, [availableCircuits]);
 
     const availableCategories = useMemo(() => {
         const cats = new Set(entries.map(e => e.category));
@@ -336,56 +369,56 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
     const TelemetryModal = ({ entry, onClose }) => {
         if (!entry) return null;
         return (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={onClose} />
-                <div className="relative w-full max-w-2xl liquid-glass rounded-3xl border-racing-blue/30 shadow-[0_0_50px_rgba(0,112,243,0.2)] overflow-hidden animate-in zoom-in slide-in-from-bottom-8 duration-500">
-                    <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-racing-blue/10 to-transparent pointer-events-none" />
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                <div className="absolute inset-0 bg-wec-black/70 backdrop-blur-lg" onClick={onClose} />
+                <div className="relative w-full max-w-2xl wec-glass rounded-xl border-wec-cyan/20 shadow-[0_0_60px_rgba(0,212,255,0.1)] overflow-hidden wec-enter">
+                    <div className="h-1 bg-gradient-to-r from-wec-blue via-wec-cyan to-wec-blue/30" />
                     <div className="p-8 relative z-10">
-                        <div className="flex justify-between items-start mb-8">
+                        <div className="flex justify-between items-start mb-6">
                             <div>
-                                <h3 className="text-[10px] font-black text-racing-blue uppercase tracking-[0.4em] mb-2">Informe de Telemetría</h3>
-                                <h2 className="text-4xl font-black italic text-white uppercase tracking-tighter">{entry.name}</h2>
-                                <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest mt-1">{entry.car} • {entry.circuit}</p>
+                                <div className="wec-label mb-2 flex items-center gap-2"><div className="w-1 h-3 bg-wec-cyan" />Informe de Telemetría</div>
+                                <h2 className="text-3xl font-bold text-white uppercase tracking-tight" style={{ fontFamily: 'var(--font-body)' }}>{entry.name}</h2>
+                                <p className="text-[10px] text-white/25 font-medium uppercase tracking-wider mt-1">{entry.car} • {entry.circuit}</p>
                             </div>
-                            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-500 hover:text-white">
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/20 hover:text-white">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-black/40 p-6 rounded-2xl border border-white/5 flex flex-col items-center justify-center">
-                                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Tiempo de Vuelta</span>
-                                <span className="text-5xl font-black italic text-racing-blue tabular-nums">{formatTime(entry.bestLap)}</span>
-                                <div className="mt-4 flex gap-2">
-                                    <span className="text-[10px] bg-racing-blue/20 text-racing-blue px-2 py-1 rounded font-bold">POS #{entry.globalPos}</span>
-                                    {entry.globalDelta > 0 && <span className="text-[10px] bg-red-500/20 text-red-500 px-2 py-1 rounded font-bold">+{entry.globalDelta.toFixed(3)}s</span>}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-wec-void/60 p-5 rounded-lg border border-white/5 flex flex-col items-center justify-center">
+                                <span className="wec-label mb-2">Lap Time</span>
+                                <span className="text-4xl font-bold text-wec-cyan wec-timing">{formatTime(entry.bestLap)}</span>
+                                <div className="mt-3 flex gap-2">
+                                    <span className="text-wec-display text-[8px] bg-wec-blue/10 text-wec-blue px-2 py-1 rounded font-bold">POS #{entry.globalPos}</span>
+                                    {entry.globalDelta > 0 && <span className="text-wec-display text-[8px] bg-wec-red/10 text-wec-red px-2 py-1 rounded font-bold">+{entry.globalDelta.toFixed(3)}s</span>}
                                 </div>
                             </div>
-                            <div className="bg-black/40 p-6 rounded-2xl border border-white/5 space-y-4">
-                                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block text-center">Desglose de Sectores</span>
+                            <div className="bg-wec-void/60 p-5 rounded-lg border border-white/5 space-y-3">
+                                <span className="wec-label block text-center">Sector Split</span>
                                 {['s1', 's2', 's3'].map((s, i) => (
                                     <div key={s} className="flex items-center justify-between">
-                                        <span className="text-[10px] font-bold text-zinc-600 uppercase">Sector {i+1}</span>
-                                        <span className="text-sm font-black text-white italic tabular-nums">{entry.sectors?.[s] ? entry.sectors[s].toFixed(3) + 's' : '--.---'}</span>
+                                        <span className="wec-label">S{i + 1}</span>
+                                        <span className="text-sm font-bold text-white wec-timing">{entry.sectors?.[s] ? entry.sectors[s].toFixed(3) + 's' : '--.---'}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <div className="mt-6 grid grid-cols-2 gap-4">
-                            <div className="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Top Speed</div>
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                            <div className="bg-wec-surface/50 p-4 rounded-lg border border-white/5 text-center">
+                                <div className="wec-label mb-1">V-Max</div>
                                 <div className="flex items-baseline justify-center gap-1">
-                                    <span className="text-2xl font-black italic text-racing-orange tabular-nums">{entry.topSpeed || '--'}</span>
-                                    <span className="text-[10px] font-bold text-zinc-600">KM/H</span>
+                                    <span className="text-xl font-bold text-wec-gold wec-timing">{entry.topSpeed || '--'}</span>
+                                    <span className="text-wec-display text-[7px] font-medium text-white/20">KM/H</span>
                                 </div>
                             </div>
-                            <div className="bg-white/5 p-4 rounded-xl border border-white/5 text-center flex flex-col justify-center">
-                                <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Versión Juego</div>
-                                <div className="text-xs font-black text-white truncate px-2">{entry.gameVersion || 'Unknown'}</div>
+                            <div className="bg-wec-surface/50 p-4 rounded-lg border border-white/5 text-center flex flex-col justify-center">
+                                <div className="wec-label mb-1">Game Version</div>
+                                <div className="text-xs font-bold text-white/60" style={{ fontFamily: 'var(--font-data)' }}>{entry.gameVersion || 'Unknown'}</div>
                             </div>
                         </div>
-                        <div className="mt-8 pt-6 border-t border-white/5 flex justify-between items-center">
-                            <div className="text-[9px] text-zinc-600 font-mono italic">MDT DATA LINK SECURE • {entry.date}</div>
-                            <button className="px-6 py-2 bg-racing-blue/10 text-racing-blue border border-racing-blue/20 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-racing-blue hover:text-white transition-all">Exportar Telemetría</button>
+                        <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center">
+                            <div className="text-wec-display text-[7px] text-white/15 uppercase tracking-wider">MDT Secure Link • {entry.date}</div>
+                            <button className="px-5 py-2 bg-wec-blue/10 text-wec-cyan border border-wec-blue/20 rounded-lg text-wec-display text-[8px] font-bold uppercase tracking-wider hover:bg-wec-blue hover:text-white transition-all">Exportar</button>
                         </div>
                     </div>
                 </div>
@@ -394,37 +427,41 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
     };
 
     return (
-        <div className="w-full space-y-8 pb-20">
+        <div className="w-full space-y-6 pb-20">
             <div className="flex flex-col md:flex-row md:items-end justify-between px-4 mt-8 gap-4">
                 <div className="flex justify-between items-center px-4 mb-4">
                     <div className="flex flex-col">
-                        <h2 className="text-3xl font-black italic tracking-widest text-white uppercase" style={{ WebkitTextStroke: '1px rgba(255,255,255,0.2)' }}>
-                            <span className="text-transparent">Global</span> Leaderboard
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="w-1 h-5 bg-wec-cyan rounded-full" />
+                            <span className="text-wec-display text-[9px] text-wec-cyan font-bold tracking-[0.3em] uppercase">Live Timing</span>
+                            <div className="w-1.5 h-1.5 rounded-full bg-wec-green wec-live-dot" />
+                        </div>
+                        <h2 className="text-3xl font-bold tracking-tight text-white uppercase" style={{ fontFamily: 'var(--font-body)' }}>
+                            Global <span className="text-wec-cyan">Leaderboard</span>
                         </h2>
-                        <span className="text-xs text-racing-blue font-bold tracking-widest uppercase mt-1">Sincronización Activa</span>
                     </div>
                 </div>
             </div>
 
-            <div className="mx-4 p-4 liquid-glass rounded-2xl border border-white/10 shadow-lg flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="mx-4 p-4 wec-glass rounded-lg border border-white/5 flex flex-col md:flex-row gap-4 items-center justify-between">
                 <div className="flex items-center gap-4 w-full md:w-auto overflow-x-auto custom-scrollbar pb-2 md:pb-0">
                     <div className="flex flex-col gap-1 shrink-0">
-                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest px-1">Circuito</label>
-                        <select className="bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-racing-blue outline-none transition-colors" value={filterCircuit} onChange={(e) => setFilterCircuit(e.target.value)}>
+                        <label className="wec-label px-1">Circuito</label>
+                        <select className="bg-wec-void/80 border border-white/5 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-wec-blue outline-none transition-colors" style={{ fontFamily: 'var(--font-data)' }} value={filterCircuit} onChange={(e) => setFilterCircuit(e.target.value)}>
                             <option value="ALL">Todos los Circuitos</option>
                             {availableCircuits.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
-                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest px-1">Clase</label>
-                        <select className="bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-racing-orange outline-none transition-colors" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                        <label className="wec-label px-1">Clase</label>
+                        <select className="bg-wec-void/80 border border-white/5 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-wec-gold outline-none transition-colors" style={{ fontFamily: 'var(--font-data)' }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
                             <option value="ALL">Todas las Categorías</option>
                             {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
-                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest px-1">Versión</label>
-                        <select className="bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-racing-success outline-none transition-colors" value={filterVersion} onChange={(e) => setFilterVersion(e.target.value)}>
+                        <label className="wec-label px-1">Versión</label>
+                        <select className="bg-wec-void/80 border border-white/5 rounded-lg px-4 py-2 text-sm font-bold text-white uppercase focus:border-wec-green outline-none transition-colors" style={{ fontFamily: 'var(--font-data)' }} value={filterVersion} onChange={(e) => setFilterVersion(e.target.value)}>
                             <option value="ALL">Todas las Versiones</option>
                             {availableVersions.map(v => <option key={v} value={v}>v{v}</option>)}
                         </select>
@@ -432,16 +469,16 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                 </div>
 
                 <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
-                    <button onClick={() => setShowOnlyMDT(!showOnlyMDT)} className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all duration-300 group ${showOnlyMDT ? 'bg-racing-orange border-racing-orange shadow-[0_0_20px_rgba(255,107,0,0.4)]' : 'bg-white/5 border-white/10 hover:border-white/20'}`}>
+                    <button onClick={() => setShowOnlyMDT(!showOnlyMDT)} className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 group ${showOnlyMDT ? 'bg-wec-gold/15 border-wec-gold/40 shadow-[0_0_20px_rgba(232,168,50,0.2)]' : 'bg-white/3 border-white/5 hover:border-white/10'}`}>
                         <img src="/logo.png" alt="MDT" className={`w-5 h-5 object-contain transition-transform duration-500 ${showOnlyMDT ? 'scale-110' : 'group-hover:scale-110'}`} />
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${showOnlyMDT ? 'text-white' : 'text-zinc-400 group-hover:text-white'}`}>Solo Equipo MDT</span>
-                        {showOnlyMDT && <div className="w-2 h-2 rounded-full bg-white animate-pulse" />}
+                        <span className={`text-wec-display text-[9px] font-bold uppercase tracking-wider ${showOnlyMDT ? 'text-wec-gold' : 'text-white/30 group-hover:text-white/60'}`}>Solo MDT</span>
+                        {showOnlyMDT && <div className="w-1.5 h-1.5 rounded-full bg-wec-gold wec-live-dot" />}
                     </button>
                     <div className="flex flex-col gap-1 w-full md:w-64 shrink-0">
-                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest px-1">Buscar Piloto / Coche</label>
+                        <label className="wec-label px-1">Buscar Piloto</label>
                         <div className="relative">
-                            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                            <input type="text" placeholder="Ej. Valiente, Ferrari..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm font-bold text-white placeholder-zinc-700 focus:border-white/30 outline-none transition-colors" />
+                            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <input type="text" placeholder="Piloto o coche..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-wec-void/80 border border-white/5 rounded-lg pl-9 pr-4 py-2 text-sm font-bold text-white placeholder-white/10 focus:border-wec-blue/30 outline-none transition-colors" style={{ fontFamily: 'var(--font-data)' }} />
                         </div>
                     </div>
                 </div>
@@ -464,69 +501,72 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                             {Object.entries(categories).map(([category, catEntries]) => {
                                 const categoryLogo = getCategoryLogo(category);
                                 return (
-                                <div key={category} className="mx-4 overflow-hidden rounded-2xl border border-white/5 bg-black/20 shadow-2xl">
-                                    <div className="bg-white/[0.02] px-6 py-3 border-b border-white/5 flex justify-between items-center">
-                                        <div className="flex items-center gap-2">
-                                            {categoryLogo && <img src={categoryLogo} alt={category} className="h-4 object-contain" />}
-                                            <span className="text-[10px] font-black text-racing-blue uppercase tracking-widest">{category}</span>
+                                    <div key={category} className="mx-4 overflow-hidden rounded-lg border border-white/5 bg-wec-void/50 shadow-2xl">
+                                        <div className="bg-wec-surface/50 px-5 py-2.5 border-b border-white/5 flex justify-between items-center">
+                                            <div className="flex items-center gap-2">
+                                                {categoryLogo && <img src={categoryLogo} alt={category} className="h-4 object-contain" />}
+                                                <span className="text-wec-display text-[9px] font-bold text-wec-cyan uppercase tracking-wider">{category}</span>
+                                            </div>
+                                            <span className="text-wec-display text-[8px] font-medium text-white/20 uppercase tracking-wider">{catEntries.length} Pilotos</span>
                                         </div>
-                                        <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">{catEntries.length} Pilotos</span>
-                                    </div>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left border-collapse">
-                                            <thead>
-                                                <tr className="bg-black/40">
-                                                    <th className="px-6 py-3 text-[9px] font-black text-zinc-500 uppercase tracking-widest border-b border-white/5">#</th>
-                                                    <th className="px-6 py-3 text-[9px] font-black text-zinc-500 uppercase tracking-widest border-b border-white/5">Piloto</th>
-                                                    <th className="px-6 py-3 text-[9px] font-black text-zinc-500 uppercase tracking-widest border-b border-white/5">Coche</th>
-                                                    <th className="px-6 py-3 text-[9px] font-black text-zinc-500 uppercase tracking-widest border-b border-white/5 text-right">Tiempo / Delta</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-white/5">
-                                                {catEntries.map((entry) => {
-                                                    const isMatch = searchQuery.trim() !== '' && (entry.name.toLowerCase().includes(searchQuery.toLowerCase()) || entry.car.toLowerCase().includes(searchQuery.toLowerCase()));
-                                                    const isTeamMember = teamMembers.has(entry.name.toLowerCase());
-                                                    return (
-                                                        <tr key={`${entry.circuit}_${entry.name}_${entry.bestLap}`} className={`transition-all duration-300 ${isMatch ? 'bg-racing-blue/20 border-l-4 border-racing-blue' : 'hover:bg-white/[0.04]'}`}>
-                                                            <td className="px-6 py-4">
-                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black italic text-sm ${entry.globalPos === 1 ? 'bg-racing-orange text-white' : 'bg-white/5 text-zinc-500'}`}>{entry.globalPos}</div>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <button onClick={() => setSelectedEntry(entry)} className="flex items-center gap-4 group/pilot text-left">
-                                                                    {isTeamMember && (
-                                                                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-racing-blue/20 to-racing-orange/20 border border-white/10 p-1 flex items-center justify-center overflow-hidden">
-                                                                            <img src="/logo.png" alt="MDT" className="w-full h-full object-contain" />
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="bg-wec-black/60">
+                                                        <th className="px-5 py-2.5 wec-label border-b border-white/5">POS</th>
+                                                        <th className="px-5 py-2.5 wec-label border-b border-white/5">Piloto</th>
+                                                        <th className="px-5 py-2.5 wec-label border-b border-white/5">Vehículo</th>
+                                                        <th className="px-5 py-2.5 wec-label border-b border-white/5 text-right">Tiempo</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-white/5">
+                                                    {catEntries.map((entry) => {
+                                                        const isMatch = searchQuery.trim() !== '' && (entry.name.toLowerCase().includes(searchQuery.toLowerCase()) || entry.car.toLowerCase().includes(searchQuery.toLowerCase()));
+                                                        const isTeamMember = teamMembers.has(entry.name.toLowerCase());
+                                                        const isLocalPlayer = localPlayerName && entry.name.toLowerCase().trim() === localPlayerName.toLowerCase().trim();
+                                                        return (
+                                                            <tr key={`${entry.circuit}_${entry.name}_${entry.bestLap}`} className={`transition-all duration-300 ${isMatch ? 'bg-wec-blue/10 border-l-2 border-wec-cyan' : (isLocalPlayer ? 'bg-wec-blue/5 border-l-2 border-l-wec-blue' : 'hover:bg-white/[0.02]')}`}>
+                                                                <td className="px-5 py-3">
+                                                                    <div className={`w-7 h-7 rounded flex items-center justify-center text-wec-display text-xs font-bold ${entry.globalPos === 1 ? 'wec-pos-1' : entry.globalPos === 2 ? 'wec-pos-2' : entry.globalPos === 3 ? 'wec-pos-3' : 'bg-white/5 text-white/30'}`}>{entry.globalPos}</div>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <button onClick={() => setSelectedEntry(entry)} className="flex items-center gap-4 group/pilot text-left">
+                                                                        {isTeamMember && (
+                                                                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-racing-blue/20 to-racing-orange/20 border border-white/10 p-1 flex items-center justify-center overflow-hidden">
+                                                                                <img src="/logo.png" alt="MDT" className="w-full h-full object-contain" />
+                                                                            </div>
+                                                                        )}
+                                                                        <div className="flex flex-col">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className={`text-sm font-bold uppercase tracking-tight group-hover/pilot:text-wec-cyan transition-colors ${entry.globalPos === 1 ? 'text-white' : (isLocalPlayer ? 'text-wec-blue' : 'text-white/60')}`}>{entry.name}</span>
+                                                                                {isTeamMember && <span className="px-1.5 py-0.5 bg-wec-gold/15 text-wec-gold text-wec-display text-[12px] font-bold uppercase rounded tracking-wider">MDT</span>}
+                                                                                {isLocalPlayer && <span className="px-1.5 py-0.5 bg-wec-blue/20 text-wec-cyan text-wec-display text-[12px] font-bold uppercase rounded tracking-wider wec-live-dot">Tú</span>}
+                                                                            </div>
+                                                                            <span className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">Ver Telemetría</span>
                                                                         </div>
-                                                                    )}
-                                                                    <div className="flex flex-col">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className={`text-base font-black uppercase tracking-tight group-hover/pilot:text-racing-blue transition-colors ${entry.globalPos === 1 ? 'text-white' : 'text-zinc-300'}`}>{entry.name}</span>
-                                                                            {isTeamMember && <span className="px-1.5 py-0.5 bg-racing-orange text-white text-[6px] font-black uppercase rounded italic">Piloto MDT</span>}
-                                                                        </div>
-                                                                        <span className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">Ver Telemetría</span>
+                                                                    </button>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <img src={getCarLogo(entry.car)} alt={entry.car} className="h-6 w-auto max-w-[40px] object-contain opacity-90" />
+                                                                        <span className="text-xs text-zinc-400 font-bold uppercase truncate max-w-[150px]">{entry.car}</span>
                                                                     </div>
-                                                                </button>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <div className="flex items-center gap-3">
-                                                                    <img src={getCarLogo(entry.car)} alt={entry.car} className="h-6 w-auto max-w-[40px] object-contain opacity-90" />
-                                                                    <span className="text-xs text-zinc-400 font-bold uppercase truncate max-w-[150px]">{entry.car}</span>
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-right">
-                                                                <div className="flex flex-col items-end justify-center">
-                                                                    <span className={`text-xl font-black italic tracking-tighter tabular-nums ${entry.globalPos === 1 ? 'text-racing-blue' : 'text-white'}`}>{formatTime(entry.bestLap)}</span>
-                                                                    {entry.globalPos > 1 && <span className="text-[10px] font-mono font-bold text-zinc-500">+{formatTime(entry.globalDelta).replace(/^0:/, '')}</span>}
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                                                                </td>
+                                                                <td className="px-6 py-4 text-right">
+                                                                    <div className="flex flex-col items-end justify-center">
+                                                                        <span className={`text-lg font-bold tracking-tight wec-timing ${entry.globalPos === 1 ? 'text-wec-cyan' : 'text-white/80'}`}>{formatTime(entry.bestLap)}</span>
+                                                                        {entry.globalPos > 1 && <span className="text-[9px] font-medium text-wec-red/60 wec-timing">+{formatTime(entry.globalDelta).replace(/^0:/, '')}</span>}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
-                                </div>
-                            )})}
+                                )
+                            })}
                         </div>
                     ))
                 )}

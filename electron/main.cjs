@@ -1,13 +1,9 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const https = require('https');
-
-// Configuración de Auto-Updater
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
+const { autoUpdater } = require('electron-updater');
 
 // Force unmuted autoplay for the intro video
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -53,6 +49,105 @@ const createWindow = () => {
 
 app.on('ready', () => {
     createWindow();
+
+    // ─────────────────────────────────────────────────────
+    // AUTO-UPDATER ENGINE
+    // ─────────────────────────────────────────────────────
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    // Log updater events
+    autoUpdater.logger = {
+        info: (msg) => console.log('[AutoUpdater]', msg),
+        warn: (msg) => console.warn('[AutoUpdater]', msg),
+        error: (msg) => console.error('[AutoUpdater]', msg),
+    };
+
+    autoUpdater.on('checking-for-update', () => {
+        console.log('[AutoUpdater] Checking for updates...');
+        if (mainWindow) mainWindow.webContents.send('update-status', { status: 'checking' });
+    });
+
+    autoUpdater.on('update-available', (info) => {
+        console.log('[AutoUpdater] Update available:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                status: 'available',
+                version: info.version,
+                releaseNotes: info.releaseNotes || '',
+                releaseDate: info.releaseDate || new Date().toISOString(),
+            });
+        }
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        console.log('[AutoUpdater] App is up to date.');
+        if (mainWindow) mainWindow.webContents.send('update-status', { status: 'up-to-date' });
+    });
+
+    autoUpdater.on('download-progress', (progress) => {
+        console.log(`[AutoUpdater] Download: ${progress.percent.toFixed(1)}%`);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                status: 'downloading',
+                percent: progress.percent,
+                bytesPerSecond: progress.bytesPerSecond,
+                transferred: progress.transferred,
+                total: progress.total,
+            });
+        }
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        console.log('[AutoUpdater] Update downloaded. Ready to install:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                status: 'ready',
+                version: info.version,
+            });
+        }
+    });
+
+    autoUpdater.on('error', (err) => {
+        console.error('[AutoUpdater] Error:', err.message);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                status: 'error',
+                error: err.message,
+            });
+        }
+    });
+
+    // IPC handlers for update actions from renderer
+    ipcMain.handle('check-for-updates', () => {
+        autoUpdater.checkForUpdates();
+    });
+
+    ipcMain.handle('download-update', () => {
+        autoUpdater.downloadUpdate();
+    });
+
+    ipcMain.handle('install-update', () => {
+        autoUpdater.quitAndInstall(false, true);
+    });
+
+    ipcMain.handle('get-app-version', () => {
+        return app.getVersion();
+    });
+
+    // Check for updates 3 seconds after launch (only in production)
+    if (app.isPackaged) {
+        setTimeout(() => {
+            autoUpdater.checkForUpdates().catch(err => {
+                console.error('[AutoUpdater] Initial check failed:', err.message);
+            });
+        }, 3000);
+
+        // Re-check every 30 minutes
+        setInterval(() => {
+            autoUpdater.checkForUpdates().catch(() => {});
+        }, 30 * 60 * 1000);
+    }
 
     const configPath = path.join(app.getPath('userData'), 'config.json');
 
@@ -328,7 +423,7 @@ app.on('ready', () => {
                     // Delay to ensure file is completely written by the game
                     setTimeout(() => {
                         processResultXML(path.join(resultsPath, filename));
-                    }, 5000);
+                    }, 1500);
                 }
             });
             return true;
@@ -343,10 +438,13 @@ app.on('ready', () => {
             if (!fs.existsSync(filePath)) return;
             const xml = fs.readFileSync(filePath, 'utf8');
 
-            // Extraction using regex (fast and requires no extra dependencies)
+            // IMPORTANT: Use TrackCourse (layout variant) NOT TrackVenue (venue complex)
+            // TrackVenue = "Sebring International Raceway" (complex name)
+            // TrackCourse = "Sebring School Circuit" (specific layout - matches scan-local-telemetry)
             const trackVenue = xml.match(/<TrackVenue>([^<]+)<\/TrackVenue>/i)?.[1] || "Unknown";
+            const trackCourse = xml.match(/<TrackCourse>([^<]+)<\/TrackCourse>/i)?.[1] || trackVenue;
+            const circuitName = trackCourse.trim();
             const trackTemp = xml.match(/<TrackTemp>([^<]+)<\/TrackTemp>/i)?.[1] || "--";
-            const ambientTemp = xml.match(/<AmbientTemp>([^<]+)<\/AmbientTemp>/i)?.[1] || "--";
             
             const driverBlocks = xml.split(/<Driver>/i);
             driverBlocks.shift(); 
@@ -395,11 +493,11 @@ app.on('ready', () => {
                 };
             }).filter(d => d.bestLap > 0 && d.name);
 
-            console.log(`Telemetry Engine: Processed ${driverData.length} drivers for ${trackVenue}`);
+            console.log(`Telemetry Engine: Processed ${driverData.length} drivers for ${circuitName}`);
 
             if (mainWindow) {
                 mainWindow.webContents.send('telemetry-update', {
-                    circuit: trackVenue,
+                    circuit: circuitName,
                     trackTemp: trackTemp,
                     results: driverData,
                     timestamp: new Date().toISOString()
@@ -416,74 +514,90 @@ app.on('ready', () => {
         if (!fs.existsSync(resultsPath)) return [];
         
         try {
-            const files = fs.readdirSync(resultsPath).filter(f => f.endsWith('.xml'));
+            // OPTIMIZACIÓN: Solo leer archivos de los últimos 7 días
+            const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+
+            const files = fs.readdirSync(resultsPath)
+                .filter(f => f.endsWith('.xml'))
+                .sort((a, b) => b.localeCompare(a)) 
+                .slice(0, 10); 
+
             const allLaps = [];
+            console.log(`MDT Debug: Iniciando escaneo cronológico de ${files.length} archivos...`);
             
-            for (const file of files) {
-                const filePath = path.join(resultsPath, file);
+            for (const filename of files) {
+                const filePath = path.join(resultsPath, filename);
                 const xml = fs.readFileSync(filePath, 'utf8');
                 
-                const setting = xml.match(/<Setting>([^<]+)<\/Setting>/i)?.[1];
-                if (!setting || setting.trim().toLowerCase() !== 'multiplayer') {
-                    continue;
-                }
-
+                const setting = xml.match(/<Setting>([^<]+)<\/Setting>/i)?.[1] || "Unknown";
+                
                 const trackVenue = xml.match(/<TrackVenue>([^<]+)<\/TrackVenue>/i)?.[1] || "Unknown";
                 const trackCourse = xml.match(/<TrackCourse>([^<]+)<\/TrackCourse>/i)?.[1] || trackVenue;
-                const trackTemp = xml.match(/<TrackTemp>([^<]+)<\/TrackTemp>/i)?.[1] || "--";
-                const ambientTemp = xml.match(/<AmbientTemp>([^<]+)<\/AmbientTemp>/i)?.[1] || "--";
+                const circuitName = trackCourse.trim();
                 
-                const circuitName = trackCourse;
-                const dateMatch = file.match(/^(\d{4}_\d{2}_\d{2})/i);
+                console.log(`MDT Debug: Procesando [${filename}] | Circuito: ${circuitName} | Modo: ${setting}`);
+
+                // Eliminamos la restricción de Multiplayer para registrar todos los récords
+                // if (!isMultiplayer) continue; 
+
+                const dateMatch = filename.match(/^(\d{4}_\d{2}_\d{2})/i);
                 const fileDate = dateMatch ? dateMatch[1].replace(/_/g, '-') : 'Reciente';
-                const gameVersion = xml.match(/<GameVersion>([^<]+)<\/GameVersion>/i)?.[1] || "Unknown";
+                
+                // Normalización de versión: Forzamos el estándar 1.3000 para la rama 1.3
+                const rawVersion = (xml.match(/<GameVersion>([^<]+)<\/GameVersion>/i)?.[1] || "").trim();
+                const verMatch = rawVersion.match(/^(\d+\.\d)/);
+                let gameVersion = verMatch ? verMatch[1] : 'Unknown';
+                if (gameVersion === '1.3') gameVersion = '1.3000';
                 
                 const driverBlocks = xml.split(/<Driver>/i);
                 driverBlocks.shift(); 
                 
                 driverBlocks.forEach(block => {
-                    const name = block.match(/<Name>([^<]+)<\/Name>/i)?.[1];
-                    const car = block.match(/<CarType>([^<]+)<\/CarType>/i)?.[1];
+                    const name = (block.match(/<Name>([^<]+)<\/Name>/i)?.[1] || "").trim();
+                    const car = (block.match(/<CarType>([^<]+)<\/CarType>/i)?.[1] || "").trim();
                     const bestLap = parseFloat(block.match(/<BestLapTime>([^<]+)<\/BestLapTime>/i)?.[1] || "0");
                     
-                    // RASTREO INTELIGENTE DE SECTORES Y VELOCIDAD
-                    let s1 = 0, s2 = 0, s3 = 0, topSpeed = 0;
-                    
-                    // Intento 1: Global
-                    topSpeed = parseFloat(block.match(/<TopSpeed>([^<]+)<\/TopSpeed>/i)?.[1] || "0");
+                    if (bestLap > 0 && name && car) {
+                    // Búsqueda inteligente de sectores de la MEJOR VUELTA
+                    let s1 = 0, s2 = 0, s3 = 0;
+                    const lapRegex = /<Lap[^>]+s1="([\d.]+)"[^>]+s2="([\d.]+)"[^>]+s3="([\d.]+)"[^>]*>([\d.]+)<\/Lap>/gi;
+                    let foundMatch = false;
 
-                    if (bestLap > 0) {
-                        const laps = block.split(/<Lap /i);
-                        laps.shift();
-                        for (const lapBlock of laps) {
-                            const lapTimeText = lapBlock.match(/>([^<]+)<\/Lap>/)?.[1];
-                            const lapTime = parseFloat(lapTimeText || "0");
-                            if (Math.abs(lapTime - bestLap) < 0.002) {
-                                s1 = parseFloat(lapBlock.match(/s1="([^"]+)"/i)?.[1] || lapBlock.match(/<s1>([^<]+)<\/s1>/i)?.[1] || "0");
-                                s2 = parseFloat(lapBlock.match(/s2="([^"]+)"/i)?.[1] || lapBlock.match(/<s2>([^<]+)<\/s2>/i)?.[1] || "0");
-                                const rawS3 = lapBlock.match(/s3="([^"]+)"/i)?.[1] || lapBlock.match(/<s3>([^<]+)<\/s3>/i)?.[1];
-                                s3 = rawS3 ? parseFloat(rawS3) : (lapTime - s1 - s2);
-                                
-                                // Intento 2: Vuelta específica
-                                const lapSpeed = parseFloat(lapBlock.match(/speed="([^"]+)"/i)?.[1] || lapBlock.match(/<Speed>([^<]+)<\/Speed>/i)?.[1] || "0");
-                                if (lapSpeed > topSpeed) topSpeed = lapSpeed;
-                                break;
-                            }
+                    for (const match of block.matchAll(lapRegex)) {
+                        const lapTime = parseFloat(match[4]);
+                        // Si esta vuelta coincide con el BestLapTime (margen de error mínimo)
+                        if (Math.abs(lapTime - bestLap) < 0.001) {
+                            s1 = parseFloat(match[1]);
+                            s2 = parseFloat(match[2]);
+                            s3 = parseFloat(match[3]);
+                            foundMatch = true;
+                            break;
                         }
                     }
 
-                    if (topSpeed > 0 && topSpeed < 150) topSpeed = topSpeed * 3.6;
+                    // Fallback si no encontramos la vuelta exacta por algún motivo
+                    if (!foundMatch) {
+                        s1 = parseFloat(block.match(/s1="([^"]+)"/i)?.[1] || "0");
+                        s2 = parseFloat(block.match(/s2="([^"]+)"/i)?.[1] || "0");
+                        const rawS3 = block.match(/s3="([^"]+)"/i)?.[1];
+                        s3 = rawS3 ? parseFloat(rawS3) : (bestLap - s1 - s2);
+                    }
                     
+                    let topSpeed = parseFloat(block.match(/<TopSpeed>([^<]+)<\/TopSpeed>/i)?.[1] || "0");
+                    if (topSpeed > 0 && topSpeed < 150) topSpeed = topSpeed * 3.6;
+
                     const isPlayerMatch = block.match(/<isPlayer>([^<]+)<\/isPlayer>/i);
                     const isPlayer = isPlayerMatch ? isPlayerMatch[1] === '1' : false;
-                    
-                    if (bestLap > 0 && name && car) {
-                        allLaps.push({ 
-                            circuit: circuitName, car, bestLap, name, 
-                            date: fileDate, isPlayer, gameVersion,
-                            sectors: { s1, s2, s3 },
-                            topSpeed: topSpeed.toFixed(1)
-                        });
+
+                    if (isPlayer) console.log(`MDT Debug: -> Piloto: ${name} | Mejor Vuelta: ${bestLap} | Sectores OK: ${foundMatch}`);
+
+                    allLaps.push({ 
+                        circuit: circuitName, car, bestLap, name, 
+                        date: fileDate, isPlayer, gameVersion,
+                        sectors: { s1, s2, s3 },
+                        topSpeed: topSpeed.toFixed(1)
+                    });
                     }
                 });
             }
@@ -505,6 +619,32 @@ app.on('ready', () => {
             return true;
         } catch (err) {
             console.error("IPC: Write error:", err);
+            throw err;
+        }
+    });
+
+    // ---------------------------------------------------------
+    // DEPURAR RESULTS: Eliminar XMLs de la carpeta Results
+    // ---------------------------------------------------------
+    ipcMain.handle('clear-results-folder', async (event, { gamePath }) => {
+        if (!gamePath) throw new Error('gamePath no proporcionado');
+        const resultsPath = path.join(gamePath, 'UserData', 'Log', 'Results');
+
+        if (!fs.existsSync(resultsPath)) {
+            return { deleted: 0, error: 'Carpeta Results no encontrada' };
+        }
+
+        try {
+            const files = fs.readdirSync(resultsPath).filter(f => f.endsWith('.xml'));
+            let deleted = 0;
+            for (const file of files) {
+                fs.unlinkSync(path.join(resultsPath, file));
+                deleted++;
+            }
+            console.log(`Clear Results: Eliminados ${deleted} archivos XML de ${resultsPath}`);
+            return { deleted };
+        } catch (err) {
+            console.error('Clear Results Error:', err);
             throw err;
         }
     });
@@ -534,33 +674,7 @@ app.on('ready', () => {
             console.error("Error listing directory:", e);
             return [];
         }
-    // ---------------------------------------------------------
-    // AUTO-UPDATER EVENTS
-    // ---------------------------------------------------------
-    autoUpdater.on('update-available', (info) => {
-        if (mainWindow) mainWindow.webContents.send('update-available', info);
     });
-
-    autoUpdater.on('update-downloaded', (info) => {
-        if (mainWindow) mainWindow.webContents.send('update-ready', info);
-    });
-
-    autoUpdater.on('error', (err) => {
-        console.error('Update error:', err);
-    });
-
-    ipcMain.handle('check-for-updates', () => {
-        autoUpdater.checkForUpdatesAndNotify();
-    });
-
-    ipcMain.handle('install-update', () => {
-        autoUpdater.quitAndInstall();
-    });
-
-    // Iniciar check al arrancar
-    setTimeout(() => {
-        autoUpdater.checkForUpdatesAndNotify();
-    }, 5000);
 });
 
 

@@ -18,8 +18,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveSetupFile: (data) => ipcRenderer.invoke('write-text-file', data),
     getDirectoryContents: (args) => ipcRenderer.invoke('get-directory-contents', args),
     toggleFullScreen: () => ipcRenderer.invoke('toggle-fullscreen'),
+    clearResultsFolder: (data) => ipcRenderer.invoke('clear-results-folder', data),
+    onTelemetryUpdate: (callback) => ipcRenderer.on('telemetry-update', (_event, value) => callback(value)),
+
+    // Auto-Updater API
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
-    onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_event, info) => callback(info)),
-    onUpdateReady: (callback) => ipcRenderer.on('update-ready', (_event, info) => callback(info)),
-    onTelemetryUpdate: (callback) => ipcRenderer.on('telemetry-update', (_event, value) => callback(value))
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, value) => callback(value)),
 });
