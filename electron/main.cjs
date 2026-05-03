@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const https = require('https');
+const http = require('http');
 const { autoUpdater } = require('electron-updater');
 
 // Force unmuted autoplay for the intro video
@@ -677,6 +678,73 @@ app.on('ready', () => {
     });
 });
 
+
+// ---------------------------------------------------------
+// LIVE TELEMETRY — LMU REST API (localhost:6397)
+// ---------------------------------------------------------
+const LMU_API_BASE = 'http://localhost:6397';
+let lmuPollInterval = null;
+
+function fetchLMUApi(endpoint) {
+    return new Promise((resolve, reject) => {
+        const req = http.get(`${LMU_API_BASE}${endpoint}`, { timeout: 1500 }, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); }
+                catch { reject(new Error('Invalid JSON')); }
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    });
+}
+
+function normalizeLMUData(raw) {
+    if (!raw) return null;
+    // Handle both rF2 style (mXxx fields) and camelCase style
+    const vehicles = (raw.mVehicles || raw.vehicles || raw.vehicleInfo || []).map(v => ({
+        driverName:   v.mDriverName   || v.driverName   || 'Unknown',
+        car:          v.mVehicleName  || v.vehicleName  || '',
+        speedKmh:     Math.round((v.mSpeed || v.speed || 0) * 3.6),
+        rpm:          Math.round(v.mEngineRPM || v.engineRPM || 0),
+        gear:         v.mGear        ?? v.gear        ?? 0,
+        throttle:     v.mUnthrottledThrottle ?? v.mThrottle ?? v.throttle ?? 0,
+        brake:        v.mBrake       ?? v.brake       ?? 0,
+        lap:          v.mTotalLaps   ?? v.totalLaps   ?? 0,
+        lastLapTime:  v.mLastLapTime  || v.lastLapTime  || 0,
+        bestLapTime:  v.mBestLapTime  || v.bestLapTime  || 0,
+        place:        v.mPlace        || v.place        || 0,
+        inPits:       v.mInPits      ?? v.inPits      ?? false,
+    }));
+
+    const s = raw.mSession || raw.session || raw.sessionInfo || {};
+    const session = {
+        track:       s.mTrackName  || s.trackName  || '',
+        type:        s.mSession    ?? s.sessionType ?? -1,
+        numVehicles: s.mNumVehicles || vehicles.length,
+    };
+
+    return { session, vehicles };
+}
+
+ipcMain.handle('start-lmu-polling', () => {
+    if (lmuPollInterval) return;
+    lmuPollInterval = setInterval(async () => {
+        try {
+            const raw = await fetchLMUApi('/rest/watch/multiSessionInfo');
+            const data = normalizeLMUData(raw);
+            if (mainWindow) mainWindow.webContents.send('lmu-update', data);
+        } catch {
+            if (mainWindow) mainWindow.webContents.send('lmu-update', null);
+        }
+    }, 500);
+});
+
+ipcMain.handle('stop-lmu-polling', () => {
+    clearInterval(lmuPollInterval);
+    lmuPollInterval = null;
+});
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
