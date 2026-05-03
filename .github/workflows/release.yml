@@ -27,7 +27,13 @@ jobs:
       - name: Build web assets
         run: npm run build
 
-      - name: Build and publish Electron installer
+      - name: Build Electron installer
+        run: npx electron-builder --win
+
+      - name: Create GitHub Release and upload assets
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+        run: |
+          $exe = (Get-ChildItem -Path dist-electron -Filter "*.exe" | Select-Object -First 1).FullName
+          gh release create $env:GITHUB_REF_NAME "$exe" "dist-electron/latest.yml" --title $env:GITHUB_REF_NAME --notes ""
