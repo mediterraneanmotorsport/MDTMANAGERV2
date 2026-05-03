@@ -20,7 +20,7 @@ const VideoIntro = ({ onFinish }) => {
                 autoPlay
                 muted={false}
             >
-                <source src="/intro.mp4" type="video/mp4" />
+                <source src="intro.mp4" type="video/mp4" />
             </video>
 
             {/* Cinematic overlays */}

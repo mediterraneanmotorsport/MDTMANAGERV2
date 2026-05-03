@@ -6,38 +6,38 @@ import { sendDiscordNotification } from '../services/discordService';
 
 const getCarLogo = (carName) => {
     const name = (carName || '').toLowerCase();
-    if (name.includes('ferrari')) return '/assets/logos/cars/Ferrari.png';
-    if (name.includes('bmw')) return '/assets/logos/cars/BMW.png';
-    if (name.includes('porsche')) return '/assets/logos/cars/Porsche.png';
-    if (name.includes('aston martin')) return '/assets/logos/cars/Aston Martin.png';
-    if (name.includes('corvette')) return '/assets/logos/cars/Corvette.png';
-    if (name.includes('ford')) return '/assets/logos/cars/Ford.png';
-    if (name.includes('lamborghini')) return '/assets/logos/cars/Lamborghini.png';
-    if (name.includes('lexus')) return '/assets/logos/cars/Lexus.png';
-    if (name.includes('mclaren')) return '/assets/logos/cars/McLaren.png';
-    if (name.includes('mercedes') || name.includes('amg')) return '/assets/logos/cars/Mercedes-AMG.png';
-    if (name.includes('toyota')) return '/assets/logos/cars/Toyota.png';
-    if (name.includes('peugeot')) return '/assets/logos/cars/Peugeot.png';
-    if (name.includes('cadillac')) return '/assets/logos/cars/Cadillac.png';
-    if (name.includes('alpine')) return '/assets/logos/cars/Alpine.png';
-    if (name.includes('glickenhaus')) return '/assets/logos/cars/Glickenhaus.png';
-    if (name.includes('isotta') || name.includes('fraschini')) return '/assets/logos/cars/Isotta Fraschini.png';
-    if (name.includes('vanwall')) return '/assets/logos/cars/Vanwall.png';
-    if (name.includes('oreca')) return '/assets/logos/cars/Oreca.png';
-    if (name.includes('ligier')) return '/assets/logos/cars/Ligier.png';
-    if (name.includes('duqueine')) return '/assets/logos/cars/Duqueine.png';
-    if (name.includes('ginetta')) return '/assets/logos/cars/Ginetta.png';
-    if (name.includes('genesis')) return '/assets/logos/cars/Genesis.png';
-    return '/assets/logos/cars/Default.png';
+    if (name.includes('ferrari')) return 'assets/logos/cars/Ferrari.png';
+    if (name.includes('bmw')) return 'assets/logos/cars/BMW.png';
+    if (name.includes('porsche')) return 'assets/logos/cars/Porsche.png';
+    if (name.includes('aston martin')) return 'assets/logos/cars/Aston Martin.png';
+    if (name.includes('corvette')) return 'assets/logos/cars/Corvette.png';
+    if (name.includes('ford')) return 'assets/logos/cars/Ford.png';
+    if (name.includes('lamborghini')) return 'assets/logos/cars/Lamborghini.png';
+    if (name.includes('lexus')) return 'assets/logos/cars/Lexus.png';
+    if (name.includes('mclaren')) return 'assets/logos/cars/McLaren.png';
+    if (name.includes('mercedes') || name.includes('amg')) return 'assets/logos/cars/Mercedes-AMG.png';
+    if (name.includes('toyota')) return 'assets/logos/cars/Toyota.png';
+    if (name.includes('peugeot')) return 'assets/logos/cars/Peugeot.png';
+    if (name.includes('cadillac')) return 'assets/logos/cars/Cadillac.png';
+    if (name.includes('alpine')) return 'assets/logos/cars/Alpine.png';
+    if (name.includes('glickenhaus')) return 'assets/logos/cars/Glickenhaus.png';
+    if (name.includes('isotta') || name.includes('fraschini')) return 'assets/logos/cars/Isotta Fraschini.png';
+    if (name.includes('vanwall')) return 'assets/logos/cars/Vanwall.png';
+    if (name.includes('oreca')) return 'assets/logos/cars/Oreca.png';
+    if (name.includes('ligier')) return 'assets/logos/cars/Ligier.png';
+    if (name.includes('duqueine')) return 'assets/logos/cars/Duqueine.png';
+    if (name.includes('ginetta')) return 'assets/logos/cars/Ginetta.png';
+    if (name.includes('genesis')) return 'assets/logos/cars/Genesis.png';
+    return 'assets/logos/cars/Default.png';
 };
 
 const getCategoryLogo = (catName) => {
     const name = (catName || '').toUpperCase();
-    if (name.includes('HYP') || name === 'HY') return '/assets/logos/categories/HY.png';
-    if (name.includes('LMP2')) return '/assets/logos/categories/LMP2.png';
-    if (name.includes('LMP3')) return '/assets/logos/categories/LMP3.jpg';
-    if (name.includes('GT3')) return '/assets/logos/categories/GT3.png';
-    if (name.includes('GTE')) return '/assets/logos/categories/GTE.png';
+    if (name.includes('HYP') || name === 'HY') return 'assets/logos/categories/HY.png';
+    if (name.includes('LMP2')) return 'assets/logos/categories/LMP2.png';
+    if (name.includes('LMP3')) return 'assets/logos/categories/LMP3.jpg';
+    if (name.includes('GT3')) return 'assets/logos/categories/GT3.png';
+    if (name.includes('GTE')) return 'assets/logos/categories/GTE.png';
     return null;
 };
 
@@ -470,7 +470,7 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
 
                 <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
                     <button onClick={() => setShowOnlyMDT(!showOnlyMDT)} className={`flex items-center gap-3 px-4 py-2 rounded-lg border transition-all duration-300 group ${showOnlyMDT ? 'bg-wec-gold/15 border-wec-gold/40 shadow-[0_0_20px_rgba(232,168,50,0.2)]' : 'bg-white/3 border-white/5 hover:border-white/10'}`}>
-                        <img src="/logo.png" alt="MDT" className={`w-5 h-5 object-contain transition-transform duration-500 ${showOnlyMDT ? 'scale-110' : 'group-hover:scale-110'}`} />
+                        <img src="logo.png" alt="MDT" className={`w-5 h-5 object-contain transition-transform duration-500 ${showOnlyMDT ? 'scale-110' : 'group-hover:scale-110'}`} />
                         <span className={`text-wec-display text-[9px] font-bold uppercase tracking-wider ${showOnlyMDT ? 'text-wec-gold' : 'text-white/30 group-hover:text-white/60'}`}>Solo MDT</span>
                         {showOnlyMDT && <div className="w-1.5 h-1.5 rounded-full bg-wec-gold wec-live-dot" />}
                     </button>
@@ -533,7 +533,7 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                                                                     <button onClick={() => setSelectedEntry(entry)} className="flex items-center gap-4 group/pilot text-left">
                                                                         {isTeamMember && (
                                                                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-racing-blue/20 to-racing-orange/20 border border-white/10 p-1 flex items-center justify-center overflow-hidden">
-                                                                                <img src="/logo.png" alt="MDT" className="w-full h-full object-contain" />
+                                                                                <img src="logo.png" alt="MDT" className="w-full h-full object-contain" />
                                                                             </div>
                                                                         )}
                                                                         <div className="flex flex-col">

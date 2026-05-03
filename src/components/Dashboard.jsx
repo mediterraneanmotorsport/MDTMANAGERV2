@@ -158,7 +158,7 @@ const Dashboard = ({ gamePath, onSelectPath, userRole, circuits, categories, all
                                         >
                                             {logo && (
                                                 <img
-                                                    src={`/assets/logos/categories/${logo}`}
+                                                    src={`assets/logos/categories/${logo}`}
                                                     alt=""
                                                     className={`w-7 h-auto mb-1.5 transition-all duration-300 ${selectedCategory === cat ? 'scale-110 opacity-100' : 'grayscale opacity-25 group-hover:opacity-60'}`}
                                                 />
@@ -203,7 +203,7 @@ const Dashboard = ({ gamePath, onSelectPath, userRole, circuits, categories, all
                                         >
                                             <div className={`w-5 h-5 flex items-center justify-center shrink-0 rounded overflow-hidden ${selectedCar === car ? 'bg-wec-gold/10' : 'bg-white/5'}`}>
                                                 {logoFile ? (
-                                                    <img src={`/assets/logos/cars/${logoFile}`} alt="" className={`w-full h-auto ${selectedCar === car ? 'brightness-150 opacity-100' : 'opacity-30'}`} />
+                                                    <img src={`assets/logos/cars/${logoFile}`} alt="" className={`w-full h-auto ${selectedCar === car ? 'brightness-150 opacity-100' : 'opacity-30'}`} />
                                                 ) : (
                                                     <div className="w-2 h-2 rounded-full bg-white/10" />
                                                 )}
