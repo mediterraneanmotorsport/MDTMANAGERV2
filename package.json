@@ -1,13 +1,13 @@
 {
   "name": "mdt-setup-manager",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "MDT Setup Manager for Le Mans Ultimate",
   "author": "Team MDT",
   "type": "module",
-  "main": "electron/main.cjs",
+  "main": "electron/main.mjs",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently -k \"vite\" \"npx wait-on http://localhost:5173 && node electron/spawn.cjs\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -49,8 +49,11 @@
     }
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "electron-squirrel-startup": "^1.0.1",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.3",
+    "express": "^5.2.1",
+    "qrcode.react": "^4.2.0"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.1",

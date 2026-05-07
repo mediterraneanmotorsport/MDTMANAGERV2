@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const _electron = require('electron');
+console.error('[DEBUG] electron module type:', typeof _electron, '| is string?', typeof _electron === 'string', '| keys:', typeof _electron === 'object' && _electron ? Object.keys(_electron).slice(0,8).join(',') : 'none');
+const { app, BrowserWindow, ipcMain, shell } = (typeof _electron === 'object' && _electron) ? _electron : {};
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const https = require('https');
 const http = require('http');
-const { autoUpdater } = require('electron-updater');
+let autoUpdater = null;
 
 // Force unmuted autoplay for the intro video
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -54,100 +56,89 @@ app.on('ready', () => {
     // ─────────────────────────────────────────────────────
     // AUTO-UPDATER ENGINE
     // ─────────────────────────────────────────────────────
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = true;
+    try {
+        autoUpdater = require('electron-updater').autoUpdater;
+    } catch (e) {
+        console.warn('[AutoUpdater] Could not load:', e.message);
+    }
 
-    // Log updater events
-    autoUpdater.logger = {
-        info: (msg) => console.log('[AutoUpdater]', msg),
-        warn: (msg) => console.warn('[AutoUpdater]', msg),
-        error: (msg) => console.error('[AutoUpdater]', msg),
-    };
+    ipcMain.handle('get-app-version', () => app.getVersion());
 
-    autoUpdater.on('checking-for-update', () => {
-        console.log('[AutoUpdater] Checking for updates...');
-        if (mainWindow) mainWindow.webContents.send('update-status', { status: 'checking' });
-    });
+    if (autoUpdater) {
+        autoUpdater.autoDownload = false;
+        autoUpdater.autoInstallOnAppQuit = true;
 
-    autoUpdater.on('update-available', (info) => {
-        console.log('[AutoUpdater] Update available:', info.version);
-        if (mainWindow) {
-            mainWindow.webContents.send('update-status', {
-                status: 'available',
-                version: info.version,
-                releaseNotes: info.releaseNotes || '',
-                releaseDate: info.releaseDate || new Date().toISOString(),
-            });
+        autoUpdater.logger = {
+            info: (msg) => console.log('[AutoUpdater]', msg),
+            warn: (msg) => console.warn('[AutoUpdater]', msg),
+            error: (msg) => console.error('[AutoUpdater]', msg),
+        };
+
+        autoUpdater.on('checking-for-update', () => {
+            console.log('[AutoUpdater] Checking for updates...');
+            if (mainWindow) mainWindow.webContents.send('update-status', { status: 'checking' });
+        });
+
+        autoUpdater.on('update-available', (info) => {
+            console.log('[AutoUpdater] Update available:', info.version);
+            if (mainWindow) {
+                mainWindow.webContents.send('update-status', {
+                    status: 'available',
+                    version: info.version,
+                    releaseNotes: info.releaseNotes || '',
+                    releaseDate: info.releaseDate || new Date().toISOString(),
+                });
+            }
+        });
+
+        autoUpdater.on('update-not-available', () => {
+            console.log('[AutoUpdater] App is up to date.');
+            if (mainWindow) mainWindow.webContents.send('update-status', { status: 'up-to-date' });
+        });
+
+        autoUpdater.on('download-progress', (progress) => {
+            console.log(`[AutoUpdater] Download: ${progress.percent.toFixed(1)}%`);
+            if (mainWindow) {
+                mainWindow.webContents.send('update-status', {
+                    status: 'downloading',
+                    percent: progress.percent,
+                    bytesPerSecond: progress.bytesPerSecond,
+                    transferred: progress.transferred,
+                    total: progress.total,
+                });
+            }
+        });
+
+        autoUpdater.on('update-downloaded', (info) => {
+            console.log('[AutoUpdater] Update downloaded. Ready to install:', info.version);
+            if (mainWindow) {
+                mainWindow.webContents.send('update-status', { status: 'ready', version: info.version });
+            }
+        });
+
+        autoUpdater.on('error', (err) => {
+            console.error('[AutoUpdater] Error:', err.message);
+            if (mainWindow) {
+                mainWindow.webContents.send('update-status', { status: 'error', error: err.message });
+            }
+        });
+
+        ipcMain.handle('check-for-updates', () => autoUpdater.checkForUpdates());
+        ipcMain.handle('download-update', () => autoUpdater.downloadUpdate());
+        ipcMain.handle('install-update', () => autoUpdater.quitAndInstall(false, true));
+
+        if (app.isPackaged) {
+            setTimeout(() => {
+                autoUpdater.checkForUpdates().catch(err => {
+                    console.error('[AutoUpdater] Initial check failed:', err.message);
+                });
+            }, 3000);
+            setInterval(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 30 * 60 * 1000);
         }
-    });
-
-    autoUpdater.on('update-not-available', () => {
-        console.log('[AutoUpdater] App is up to date.');
-        if (mainWindow) mainWindow.webContents.send('update-status', { status: 'up-to-date' });
-    });
-
-    autoUpdater.on('download-progress', (progress) => {
-        console.log(`[AutoUpdater] Download: ${progress.percent.toFixed(1)}%`);
-        if (mainWindow) {
-            mainWindow.webContents.send('update-status', {
-                status: 'downloading',
-                percent: progress.percent,
-                bytesPerSecond: progress.bytesPerSecond,
-                transferred: progress.transferred,
-                total: progress.total,
-            });
-        }
-    });
-
-    autoUpdater.on('update-downloaded', (info) => {
-        console.log('[AutoUpdater] Update downloaded. Ready to install:', info.version);
-        if (mainWindow) {
-            mainWindow.webContents.send('update-status', {
-                status: 'ready',
-                version: info.version,
-            });
-        }
-    });
-
-    autoUpdater.on('error', (err) => {
-        console.error('[AutoUpdater] Error:', err.message);
-        if (mainWindow) {
-            mainWindow.webContents.send('update-status', {
-                status: 'error',
-                error: err.message,
-            });
-        }
-    });
-
-    // IPC handlers for update actions from renderer
-    ipcMain.handle('check-for-updates', () => {
-        autoUpdater.checkForUpdates();
-    });
-
-    ipcMain.handle('download-update', () => {
-        autoUpdater.downloadUpdate();
-    });
-
-    ipcMain.handle('install-update', () => {
-        autoUpdater.quitAndInstall(false, true);
-    });
-
-    ipcMain.handle('get-app-version', () => {
-        return app.getVersion();
-    });
-
-    // Check for updates 3 seconds after launch (only in production)
-    if (app.isPackaged) {
-        setTimeout(() => {
-            autoUpdater.checkForUpdates().catch(err => {
-                console.error('[AutoUpdater] Initial check failed:', err.message);
-            });
-        }, 3000);
-
-        // Re-check every 30 minutes
-        setInterval(() => {
-            autoUpdater.checkForUpdates().catch(() => {});
-        }, 30 * 60 * 1000);
+    } else {
+        ipcMain.handle('check-for-updates', () => {});
+        ipcMain.handle('download-update', () => {});
+        ipcMain.handle('install-update', () => {});
     }
 
     const configPath = path.join(app.getPath('userData'), 'config.json');
@@ -680,71 +671,196 @@ app.on('ready', () => {
 
 
 // ---------------------------------------------------------
-// LIVE TELEMETRY — LMU REST API (localhost:6397)
+// LIVE TELEMETRY — LMU WebSocket + REST fallback
+// WS:   ws://localhost:6398/websocket/controlpanel  (real-time)
+// REST: http://localhost:6397/rest/multiplayer/teams (supplementary)
 // ---------------------------------------------------------
-const LMU_API_BASE = 'http://localhost:6397';
-let lmuPollInterval = null;
 
-function fetchLMUApi(endpoint) {
-    return new Promise((resolve, reject) => {
-        const req = http.get(`${LMU_API_BASE}${endpoint}`, { timeout: 1500 }, (res) => {
+let lmuWs = null;
+let lmuReconnectTimer = null;
+let lmuRestInterval = null;
+let lmuLogOnce = false;
+
+function lmuRestGet(path) {
+    return new Promise((resolve) => {
+        const req = http.get({ hostname: 'localhost', port: 6397, path, timeout: 2000 }, (res) => {
             let data = '';
-            res.on('data', chunk => { data += chunk; });
-            res.on('end', () => {
-                try { resolve(JSON.parse(data)); }
-                catch { reject(new Error('Invalid JSON')); }
-            });
+            res.on('data', c => data += c);
+            res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
         });
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
     });
 }
 
-function normalizeLMUData(raw) {
-    if (!raw) return null;
-    // Handle both rF2 style (mXxx fields) and camelCase style
-    const vehicles = (raw.mVehicles || raw.vehicles || raw.vehicleInfo || []).map(v => ({
-        driverName:   v.mDriverName   || v.driverName   || 'Unknown',
-        car:          v.mVehicleName  || v.vehicleName  || '',
-        speedKmh:     Math.round((v.mSpeed || v.speed || 0) * 3.6),
-        rpm:          Math.round(v.mEngineRPM || v.engineRPM || 0),
-        gear:         v.mGear        ?? v.gear        ?? 0,
-        throttle:     v.mUnthrottledThrottle ?? v.mThrottle ?? v.throttle ?? 0,
-        brake:        v.mBrake       ?? v.brake       ?? 0,
-        lap:          v.mTotalLaps   ?? v.totalLaps   ?? 0,
-        lastLapTime:  v.mLastLapTime  || v.lastLapTime  || 0,
-        bestLapTime:  v.mBestLapTime  || v.bestLapTime  || 0,
-        place:        v.mPlace        || v.place        || 0,
-        inPits:       v.mInPits      ?? v.inPits      ?? false,
-    }));
-
-    const s = raw.mSession || raw.session || raw.sessionInfo || {};
-    const session = {
-        track:       s.mTrackName  || s.trackName  || '',
-        type:        s.mSession    ?? s.sessionType ?? -1,
-        numVehicles: s.mNumVehicles || vehicles.length,
-    };
-
-    return { session, vehicles };
+function lmuRestPost(path, body) {
+    return new Promise((resolve) => {
+        const bodyStr = JSON.stringify(body || {});
+        const req = http.request({
+            hostname: 'localhost', port: 6397, path, method: 'POST', timeout: 2000,
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) },
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+        req.write(bodyStr);
+        req.end();
+    });
 }
 
-ipcMain.handle('start-lmu-polling', () => {
-    if (lmuPollInterval) return;
-    lmuPollInterval = setInterval(async () => {
-        try {
-            const raw = await fetchLMUApi('/rest/watch/multiSessionInfo');
-            const data = normalizeLMUData(raw);
-            if (mainWindow) mainWindow.webContents.send('lmu-update', data);
-        } catch {
-            if (mainWindow) mainWindow.webContents.send('lmu-update', null);
-        }
-    }, 500);
-});
+function normalizeVehicle(v) {
+    const rawSpeed = v.speed ?? v.Speed ?? v.mSpeed ?? v.speedKmh ?? 0;
+    const speedKmh = rawSpeed > 100 ? Math.round(rawSpeed) : Math.round(rawSpeed * 3.6);
+    const d = v.driver || v.Driver || {};
+    const driverName = v.driverName || v.DriverName || v.name || v.Name ||
+        (typeof d === 'string' ? d : d.name || d.Name || d.fullName || '') || 'Unknown';
+    return {
+        driverName,
+        car:         v.car || v.Car || v.vehicleName || v.vehicle || v.carName || '',
+        speedKmh,
+        rpm:         Math.round(v.rpm ?? v.RPM ?? v.mEngineRPM ?? 0),
+        gear:        v.gear ?? v.Gear ?? v.mGear ?? 0,
+        throttle:    v.throttle ?? v.Throttle ?? v.mThrottle ?? 0,
+        brake:       v.brake ?? v.Brake ?? v.mBrake ?? 0,
+        lap:         v.lap ?? v.laps ?? v.totalLaps ?? v.mTotalLaps ?? 0,
+        lastLapTime: v.lastLapTime ?? v.lastLap ?? v.mLastLapTime ?? 0,
+        bestLapTime: v.bestLapTime ?? v.bestLap ?? v.mBestLapTime ?? 0,
+        place:       v.position ?? v.place ?? v.Place ?? v.mPlace ?? 0,
+        inPits:      !!(v.inPits ?? v.InPits ?? v.mInPits ?? false),
+    };
+}
 
-ipcMain.handle('stop-lmu-polling', () => {
-    clearInterval(lmuPollInterval);
-    lmuPollInterval = null;
-});
+function buildLmuPayload(rawVehicles, sessionRaw) {
+    if (!rawVehicles || rawVehicles.length === 0) return null;
+    const s = sessionRaw || {};
+    return {
+        session: {
+            track:       s.track || s.trackName || s.TrackName || s.name || s.sTrackName || '',
+            type:        s.sessionType ?? s.type ?? s.Type ?? s.mSession ?? -1,
+            numVehicles: rawVehicles.length,
+        },
+        vehicles: rawVehicles.map(normalizeVehicle),
+    };
+}
+
+function processWsMessage(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+
+    if (!lmuLogOnce) {
+        lmuLogOnce = true;
+        console.log('[LMU WS] First message keys:', Object.keys(msg || {}));
+        console.log('[LMU WS] Sample:', JSON.stringify(msg).slice(0, 600));
+    }
+
+    let vehicles = [];
+    let session = null;
+
+    if (Array.isArray(msg)) {
+        vehicles = msg;
+    } else if (msg && Array.isArray(msg.vehicles)) {
+        vehicles = msg.vehicles;
+        session = msg.session || msg.sessionInfo || null;
+    } else if (msg && Array.isArray(msg.entries)) {
+        vehicles = msg.entries;
+    } else if (msg && msg.drivers && typeof msg.drivers === 'object') {
+        vehicles = Object.values(msg.drivers);
+        session = msg.session || null;
+    } else if (msg && msg.type && msg.data) {
+        const d = msg.data;
+        vehicles = Array.isArray(d) ? d : (d && typeof d === 'object' ? [d] : []);
+    }
+
+    const payload = buildLmuPayload(vehicles, session);
+    if (mainWindow) mainWindow.webContents.send('lmu-update', payload);
+}
+
+function startLmuRestFallback() {
+    if (lmuRestInterval) return;
+    console.log('[LMU] Starting REST fallback polling');
+    lmuLogOnce = false;
+    lmuRestInterval = setInterval(async () => {
+        const [teams, allVehicles] = await Promise.all([
+            lmuRestGet('/rest/multiplayer/teams'),
+            lmuRestPost('/rest/sessions/getAllVehicles', {}),
+        ]);
+
+        if (!lmuLogOnce) {
+            lmuLogOnce = true;
+            console.log('[LMU REST] /rest/multiplayer/teams:', JSON.stringify(teams).slice(0, 400));
+            console.log('[LMU REST] /rest/sessions/getAllVehicles:', JSON.stringify(allVehicles).slice(0, 400));
+        }
+
+        let rawVehicles = [];
+        let sessionRaw = null;
+
+        if (Array.isArray(allVehicles) && allVehicles.length > 0) {
+            rawVehicles = allVehicles;
+        } else if (teams && teams.drivers && typeof teams.drivers === 'object') {
+            rawVehicles = Object.values(teams.drivers);
+        } else if (teams && teams.teams && typeof teams.teams === 'object') {
+            rawVehicles = Object.values(teams.teams).flatMap(t => t.drivers ? Object.values(t.drivers) : [t]);
+        }
+
+        const payload = buildLmuPayload(rawVehicles, sessionRaw);
+        if (mainWindow) mainWindow.webContents.send('lmu-update', payload);
+    }, 1000);
+}
+
+function connectLmuWs() {
+    if (lmuWs) return;
+    clearTimeout(lmuReconnectTimer);
+
+    const WS = globalThis.WebSocket;
+    if (!WS) {
+        console.warn('[LMU] Native WebSocket unavailable (requires Node.js 22+). Using REST fallback.');
+        startLmuRestFallback();
+        return;
+    }
+
+    const wsUrl = 'ws://localhost:6398/websocket/controlpanel';
+    console.log('[LMU] Connecting WebSocket:', wsUrl);
+    lmuLogOnce = false;
+
+    try {
+        lmuWs = new WS(wsUrl);
+    } catch (e) {
+        console.error('[LMU] WS failed to create:', e.message);
+        lmuWs = null;
+        startLmuRestFallback();
+        return;
+    }
+
+    lmuWs.onopen = () => console.log('[LMU] WebSocket open');
+
+    lmuWs.onmessage = (ev) => processWsMessage(ev.data);
+
+    lmuWs.onerror = () => {};
+
+    lmuWs.onclose = () => {
+        console.log('[LMU] WebSocket closed — retry in 5s');
+        lmuWs = null;
+        if (mainWindow) mainWindow.webContents.send('lmu-update', null);
+        lmuReconnectTimer = setTimeout(connectLmuWs, 5000);
+    };
+}
+
+function disconnectLmu() {
+    clearTimeout(lmuReconnectTimer);
+    clearInterval(lmuRestInterval);
+    lmuRestInterval = null;
+    if (lmuWs) {
+        lmuWs.onclose = null;
+        lmuWs.close();
+        lmuWs = null;
+    }
+}
+
+ipcMain.handle('start-lmu-polling', () => connectLmuWs());
+ipcMain.handle('stop-lmu-polling', () => disconnectLmu());
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
