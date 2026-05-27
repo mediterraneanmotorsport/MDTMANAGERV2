@@ -397,7 +397,7 @@ app.on('ready', () => {
     // MDT TELEMETRY WATCHER ENGINE
     // ---------------------------------------------------------
     let resultWatcher = null;
-    let lastProcessedFile = null;
+    const fileLastProcessedTimes = new Map(); // filename -> timestamp
 
     ipcMain.handle('start-telemetry-watcher', (event, { gamePath }) => {
         if (!gamePath) return false;
@@ -416,14 +416,19 @@ app.on('ready', () => {
 
         try {
             resultWatcher = fs.watch(resultsPath, (eventType, filename) => {
-                if (filename && filename.endsWith('.xml') && filename !== lastProcessedFile) {
-                    console.log("Telemetry Engine: New result detected:", filename);
-                    lastProcessedFile = filename;
-                    
-                    // Delay to ensure file is completely written by the game
-                    setTimeout(() => {
-                        processResultXML(path.join(resultsPath, filename));
-                    }, 1500);
+                if (filename && filename.endsWith('.xml')) {
+                    const now = Date.now();
+                    const lastTime = fileLastProcessedTimes.get(filename) || 0;
+                    // Debounce de 3 segundos para evitar procesamientos duplicados del mismo guardado rápido
+                    if (now - lastTime > 3000) {
+                        fileLastProcessedTimes.set(filename, now);
+                        console.log("Telemetry Engine: New result detected:", filename);
+                        
+                        // Delay to ensure file is completely written by the game
+                        setTimeout(() => {
+                            processResultXML(path.join(resultsPath, filename));
+                        }, 1500);
+                    }
                 }
             });
             return true;
@@ -455,6 +460,9 @@ app.on('ready', () => {
                 const bestLap = parseFloat(block.match(/<BestLapTime>([^<]+)<\/BestLapTime>/i)?.[1] || "0");
                 const currentSetup = block.match(/<CurrentSetup>([^<]+)<\/CurrentSetup>/i)?.[1] || "Personalizado";
                 
+                const isPlayerMatch = block.match(/<isPlayer>([^<]+)<\/isPlayer>/i);
+                const isPlayer = isPlayerMatch ? isPlayerMatch[1] === '1' : false;
+
                 // RASTREO INTELIGENTE DE SECTORES Y VELOCIDAD
                 let s1 = 0, s2 = 0, s3 = 0, topSpeed = 0;
                 
@@ -489,7 +497,8 @@ app.on('ready', () => {
                 return { 
                     name, car, bestLap, currentSetup, 
                     sectors: { s1, s2, s3 },
-                    topSpeed: topSpeed.toFixed(1)
+                    topSpeed: topSpeed.toFixed(1),
+                    isPlayer
                 };
             }).filter(d => d.bestLap > 0 && d.name);
 
@@ -514,14 +523,21 @@ app.on('ready', () => {
         if (!fs.existsSync(resultsPath)) return [];
         
         try {
-            // OPTIMIZACIÓN: Solo leer archivos de los últimos 7 días
-            const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-            const now = Date.now();
-
+            // OPTIMIZACIÓN: Ordenar por fecha de modificación real y tomar las 10 sesiones más recientes
             const files = fs.readdirSync(resultsPath)
                 .filter(f => f.endsWith('.xml'))
-                .sort((a, b) => b.localeCompare(a)) 
-                .slice(0, 10); 
+                .map(f => {
+                    const filePath = path.join(resultsPath, f);
+                    try {
+                        const stats = fs.statSync(filePath);
+                        return { name: f, mtime: stats.mtimeMs };
+                    } catch (e) {
+                        return { name: f, mtime: 0 };
+                    }
+                })
+                .sort((a, b) => b.mtime - a.mtime)
+                .slice(0, 10)
+                .map(f => f.name); 
 
             const allLaps = [];
             console.log(`MDT Debug: Iniciando escaneo cronológico de ${files.length} archivos...`);

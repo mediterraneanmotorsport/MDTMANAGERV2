@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, getDocs, setDoc, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { sendDiscordNotification } from '../services/discordService';
 
@@ -55,6 +55,53 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
     const sentNotifications = useRef(new Set());
     const [selectedEntry, setSelectedEntry] = useState(null);
     const sessionStartTime = useRef(new Date());
+    
+    // Dynamic Refs to bypass Stale Closure in telemetry updates
+    const webhookRef = useRef(null);
+    const membersSetRef = useRef(new Set());
+    const ignoredRecordsRef = useRef(new Set());
+    const ignoredTimesMapRef = useRef({});
+    const cloudMapRef = useRef({});
+
+    // 1. Reactive Webhook Listener
+    useEffect(() => {
+        const unsub = onSnapshot(doc(db, "settings", "discord"), (docSnap) => {
+            if (docSnap.exists()) {
+                webhookRef.current = docSnap.data().url || null;
+                console.log("MDT Leaderboard: Webhook updated in real-time:", webhookRef.current ? "Configured" : "None");
+            } else {
+                webhookRef.current = null;
+            }
+        }, err => console.error("Leaderboard Webhook listener error:", err));
+        return () => unsub();
+    }, []);
+
+    // 2. Reactive MDT Members Listener
+    useEffect(() => {
+        const unsub = onSnapshot(collection(db, "mdt_members"), (snapshot) => {
+            const members = new Set(snapshot.docs.map(d => d.data().name ? d.data().name.trim().toLowerCase() : ""));
+            membersSetRef.current = members;
+            setTeamMembers(members);
+            console.log(`MDT Leaderboard: Members updated in real-time: ${members.size}`);
+        }, err => console.error("Leaderboard Members listener error:", err));
+        return () => unsub();
+    }, []);
+
+    // 3. Reactive Ignored Records Listener
+    useEffect(() => {
+        const unsub = onSnapshot(collection(db, "ignored_records"), (snapshot) => {
+            const ignored = new Set(snapshot.docs.map(d => d.id));
+            const ignoredTimes = {};
+            snapshot.forEach(doc => {
+                ignoredTimes[doc.id] = doc.data().bestLap;
+            });
+            ignoredRecordsRef.current = ignored;
+            ignoredTimesMapRef.current = ignoredTimes;
+            setIgnoredRecords(ignored);
+            console.log(`MDT Leaderboard: Ignored records updated in real-time: ${ignored.size}`);
+        }, err => console.error("Leaderboard Ignored Records listener error:", err));
+        return () => unsub();
+    }, []);
 
     const getCategory = (modelStr) => {
         if (!modelStr) return 'OTRO';
@@ -89,7 +136,7 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                 const getIdentityBase = (lap) => {
                     const circ = (lap.circuit || '').replace(/\s+/g, '').toLowerCase();
                     const cat = getCategory(lap.car).replace(/\s+/g, '').toLowerCase();
-                    const name = (lap.name || '').replace(/\s+/g, '').toLowerCase();
+                    const name = (lap.name || '').split('#')[0].replace(/\s+/g, '').toLowerCase();
                     return `${circ}_${cat}_${name}`;
                 };
 
@@ -102,31 +149,15 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                     return `${base}_${ver}`;
                 };
 
-                // 2. Carga de Datos (Prioridad Cloud para la UI)
-                const [cloudSnap, settingsSnap, membersSnap, ignoredSnap, allLocal] = await Promise.all([
+                // 2. Carga de Datos (Prioridad Cloud para la UI y logs locales recientes)
+                const [cloudSnap, allLocal] = await Promise.all([
                     getDocs(collection(db, "lmu_leaderboard")),
-                    getDoc(doc(db, "settings", "discord")),
-                    getDocs(collection(db, "mdt_members")),
-                    getDocs(collection(db, "ignored_records")),
                     window.electronAPI.scanLocalTelemetry({ gamePath })
                 ]);
 
-                const webhook = settingsSnap.exists() ? settingsSnap.data().url : null;
-                const membersSet = new Set(membersSnap.docs.map(d => d.data().name.trim().toLowerCase()));
-                const ignoredSet = new Set(ignoredSnap.docs.map(d => d.id));
+                console.log(`MDT Leaderboard: [INIT] Sincronizando logs con registros locales: ${allLocal?.length || 0}`);
 
-                console.log(`MDT Leaderboard: [INIT] Miembros cargados: ${membersSet.size} | Registros locales: ${allLocal?.length || 0}`);
-
-                setTeamMembers(membersSet);
-                setIgnoredRecords(ignoredSet);
-
-                // 3. Preparar lista inteligente de ignorados (POR TIEMPO O ID)
-                const ignoredTimesMap = {};
-                ignoredSnap.forEach(doc => {
-                    ignoredTimesMap[doc.id] = doc.data().bestLap;
-                });
-
-                // 4. Procesar Datos de la NUBE con Consolidación Extrema
+                // 3. Procesar Datos de la NUBE con Consolidación Extrema
                 const cloudMap = {};
                 cloudSnap.forEach((doc) => {
                     const data = doc.data();
@@ -143,10 +174,10 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                     const identityBase = getIdentityBase(data);
 
                     // Filtro de Seguridad: ¿Está en la lista negra?
-                    const ignoredByTime = ignoredTimesMap[identityBase] || ignoredTimesMap[key];
+                    const ignoredByTime = ignoredTimesMapRef.current[identityBase] || ignoredTimesMapRef.current[key];
                     const isTimeIgnored = ignoredByTime && Math.abs(data.bestLap - ignoredByTime) < 0.001;
 
-                    if (ignoredSet.has(key) || isTimeIgnored) return;
+                    if (ignoredRecordsRef.current.has(key) || isTimeIgnored) return;
 
                     const existing = cloudMap[identityBase];
                     const isNewFaster = !existing || Number(data.bestLap) < Number(existing.bestLap);
@@ -160,26 +191,26 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                     }
                 });
 
+                cloudMapRef.current = cloudMap;
                 const finalCloudEntries = Object.values(cloudMap);
                 console.log(`MDT Leaderboard: Mostrando ${finalCloudEntries.length} récords consolidados.`);
                 setEntries(finalCloudEntries);
                 setLoading(false);
 
-                // 5. Motor de Actualización (Background)
-                const processLap = async (lap, circuitName) => {
+                // 4. Motor de Actualización (Background)
+                const processLap = async (lap, circuitName, isLive = false) => {
                     const fullLap = { ...lap, circuit: circuitName || lap.circuit };
                     const key = getIdentityKey(fullLap);
                     const baseKey = getIdentityBase(fullLap);
 
                     // COMPROBACIÓN INTELIGENTE DE IGNORADOS
-                    // Bloqueamos si coincide el ID exacto O si coincide la identidad base + el tiempo
-                    const isSpecificIgnored = ignoredSet.has(key);
-                    const ignoredTime = ignoredTimesMap[baseKey] || ignoredTimesMap[key];
+                    const isSpecificIgnored = ignoredRecordsRef.current.has(key);
+                    const ignoredTime = ignoredTimesMapRef.current[baseKey] || ignoredTimesMapRef.current[key];
                     const isTimeIgnored = ignoredTime && Math.abs(lap.bestLap - ignoredTime) < 0.001;
 
                     // Identificar al jugador local para el resaltado UI
                     if (lap.isPlayer && lap.name && !localPlayerName) {
-                        setLocalPlayerName(lap.name);
+                        setLocalPlayerName(lap.name.split('#')[0].trim());
                     }
 
                     if (isSpecificIgnored || isTimeIgnored) {
@@ -187,7 +218,7 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                         return;
                     }
 
-                    const existingCloud = cloudMap[baseKey]; // USAR BASEKEY PARA EVITAR SUBIDAS INFINITAS
+                    const existingCloud = cloudMapRef.current[baseKey];
                     const hasLocalSectors = lap.sectors && (lap.sectors.s1 > 0 || lap.sectors.s2 > 0 || lap.sectors.s3 > 0);
 
                     // Normalización de versión para la comparación
@@ -198,19 +229,18 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
 
                     console.log(`MDT Sync: [CHECK] ${lap.name} | Local: ${lap.bestLap} | Cloud: ${existingCloud?.bestLap || 'Ninguno'}`);
 
-                    // REGLA DE ORO: El tiempo más rápido MANDA. 
-                    // No permitimos que un tiempo lento sobrescriba a uno rápido por tener sectores.
                     const isFaster = !existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001;
                     const isSameTimeButBetterData = existingCloud &&
                         Math.abs(Number(lap.bestLap) - Number(existingCloud.bestLap)) < 0.001 &&
                         hasLocalSectors && (!existingCloud.sectors || existingCloud.sectors.s1 === 0);
 
                     if (isFaster || isSameTimeButBetterData) {
+                        const cleanPilotName = lap.name.split('#')[0].trim();
                         const uploadData = {
                             circuit: fullLap.circuit,
                             category: getCategory(lap.car),
                             car: lap.car,
-                            name: lap.name.trim(),
+                            name: cleanPilotName,
                             bestLap: Number(lap.bestLap),
                             sectors: lap.sectors || { s1: 0, s2: 0, s3: 0 },
                             topSpeed: lap.topSpeed || '0',
@@ -218,44 +248,53 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                             date: new Date().toISOString()
                         };
 
-                        console.log(`MDT Sync: [UPLOAD] Subiendo mejora de ${name}: ${lap.bestLap}s`);
+                        console.log(`MDT Sync: [UPLOAD] Subiendo mejora de ${cleanPilotName}: ${lap.bestLap}s`);
                         await setDoc(doc(db, "lmu_leaderboard", key), uploadData);
-                        cloudMap[baseKey] = { ...uploadData, key };
+                        cloudMapRef.current[baseKey] = { ...uploadData, key };
 
-                        // Notificación Discord (SOLO SI ES MEJORA REAL SOBRE TODO LO QUE TENEMOS)
-                        const currentBest = cloudMap[baseKey]?.bestLap || Infinity;
-                        if (membersSet.has(lap.name.trim().toLowerCase()) && webhook && Number(lap.bestLap) < Number(currentBest) + 0.001) {
-                            // Solo enviamos si realmente estamos mejorando el récord absoluto que tiene la app en este momento
-                            if (!existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001) {
-                                sendDiscordNotification(webhook, {
-                                    pilot: lap.name, circuit: fullLap.circuit, car: lap.car,
-                                    lapTime: lap.bestLap, category: uploadData.category,
-                                    improvement: existingCloud ? existingCloud.bestLap - lap.bestLap : 0
-                                });
+                        // Notificación Discord (SOLO SI ES MEJORA REAL SOBRE TODO LO QUE TENEMOS EN TIEMPO REAL)
+                        const isPilotTracked = lap.isPlayer || membersSetRef.current.has(cleanPilotName.toLowerCase());
+                        const webhook = webhookRef.current;
+                        if (isLive && isPilotTracked && webhook) {
+                            const notificationKey = `${cleanPilotName.toLowerCase()}_${fullLap.circuit}_${lap.bestLap}`;
+                            if (!sentNotifications.current.has(notificationKey)) {
+                                if (!existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001) {
+                                    sentNotifications.current.add(notificationKey);
+                                    sendDiscordNotification(webhook, {
+                                        pilot: cleanPilotName,
+                                        circuit: fullLap.circuit,
+                                        car: lap.car,
+                                        lapTime: lap.bestLap,
+                                        category: uploadData.category,
+                                        improvement: existingCloud ? existingCloud.bestLap - lap.bestLap : 0,
+                                        previousTime: existingCloud ? existingCloud.bestLap : null,
+                                        sectors: lap.sectors,
+                                        topSpeed: lap.topSpeed
+                                    });
+                                }
                             }
                         }
                     }
                 };
 
-                // Sincronizar logs históricos en segundo plano (Secuencial para evitar saturación)
-                // 5. Motor de Sincronización Histórica (Primeros 30 archivos)
+                // 5. Motor de Sincronización Histórica (Primeros 10 archivos locales ordenados)
                 const syncHistory = async () => {
                     if (!allLocal || allLocal.length === 0) {
                         console.log("MDT Sync: No se encontraron registros locales recientes.");
                     } else {
                         console.log(`MDT Sync: Iniciando escaneo de ${allLocal.length} archivos locales...`);
                         for (const l of allLocal) {
-                            const pilotName = (l.name || '').toLowerCase().trim();
-                            const isMember = membersSet.has(pilotName);
+                            const pilotName = (l.name || '').split('#')[0].toLowerCase().trim();
+                            const isMember = membersSetRef.current.has(pilotName);
                             const shouldProcess = l.isPlayer || isMember;
 
                             if (shouldProcess) {
-                                await processLap(l);
+                                await processLap(l, null, false);
                             }
                         }
                     }
 
-                    const finalEntries = Object.values(cloudMap);
+                    const finalEntries = Object.values(cloudMapRef.current);
                     console.log(`MDT Sync: Sincronización finalizada. UI actualizada.`);
                     setEntries(finalEntries);
                     setLoading(false);
@@ -268,13 +307,13 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                     window.electronAPI.onTelemetryUpdate(async data => {
                         console.log("MDT Sync: Nueva telemetría en pista...");
                         for (const lap of data.results) {
-                            const pilotName = (lap.name || '').toLowerCase().trim();
-                            const isMember = membersSet.has(pilotName);
+                            const pilotName = (lap.name || '').split('#')[0].toLowerCase().trim();
+                            const isMember = membersSetRef.current.has(pilotName);
                             if (lap.isPlayer || isMember) {
-                                await processLap(lap, data.circuit);
+                                await processLap(lap, data.circuit, true);
                             }
                         }
-                        setEntries(Object.values(cloudMap));
+                        setEntries(Object.values(cloudMapRef.current));
                     });
                 }
 

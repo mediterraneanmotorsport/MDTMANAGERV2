@@ -35,15 +35,18 @@ const TeamManagement = () => {
         setTesting(true);
         try {
             await sendDiscordNotification(webhook, {
-                pilot: "Consola MDT",
-                circuit: "Sistema de Control",
-                car: "MDT Motorsport Bot",
-                lapTime: 0,
-                category: "SYSTEM TEST",
-                improvement: 0,
-                isTest: true
+                pilot: "Aitor Moduga",
+                circuit: "Paul Ricard - 1A-V2",
+                car: "Ginetta G61-LT-P325 Evo",
+                lapTime: 112.500, // 1:52.500
+                category: "LMP3",
+                improvement: 0.740,
+                previousTime: 113.240, // 1:53.240
+                sectors: { s1: 28.452, s2: 38.120, s3: 45.928 },
+                topSpeed: "284.5",
+                isTest: false
             });
-            alert("🚀 Mensaje de prueba enviado a Discord");
+            alert("🚀 Mensaje de prueba de Aitor Moduga forzado a Discord");
         } catch (err) {
             alert("❌ Error al enviar: " + err.message);
         } finally {
