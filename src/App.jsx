@@ -6,8 +6,19 @@ import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import VideoIntro from './components/VideoIntro';
 import UpdateNotification from './components/UpdateNotification';
+import LiveTelemetry from './components/LiveTelemetry';
 
 function App() {
+  const isMobileLive = new URLSearchParams(window.location.search).get('mobile') === '1';
+
+  if (isMobileLive) {
+    return (
+      <div className="w-screen h-screen bg-black overflow-hidden flex flex-col">
+        <LiveTelemetry />
+      </div>
+    );
+  }
+
   const [showIntro, setShowIntro] = useState(true);
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);

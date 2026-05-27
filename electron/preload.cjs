@@ -19,7 +19,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDirectoryContents: (args) => ipcRenderer.invoke('get-directory-contents', args),
     toggleFullScreen: () => ipcRenderer.invoke('toggle-fullscreen'),
     clearResultsFolder: (data) => ipcRenderer.invoke('clear-results-folder', data),
+    getLocalUrl: () => ipcRenderer.invoke('get-local-url'),
     onTelemetryUpdate: (callback) => ipcRenderer.on('telemetry-update', (_event, value) => callback(value)),
+
+    // Live Telemetry — LMU REST API
+    startLmuPolling: () => ipcRenderer.invoke('start-lmu-polling'),
+    stopLmuPolling:  () => ipcRenderer.invoke('stop-lmu-polling'),
+    onLmuUpdate: (cb) => ipcRenderer.on('lmu-update', (_e, d) => cb(d)),
+    offLmuUpdate: () => ipcRenderer.removeAllListeners('lmu-update'),
+    onLmuLocalTelemetry: (cb) => ipcRenderer.on('lmu-local-telemetry', (_e, d) => cb(d)),
+    offLmuLocalTelemetry: () => ipcRenderer.removeAllListeners('lmu-local-telemetry'),
 
     // Auto-Updater API
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
