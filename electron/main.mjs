@@ -57,6 +57,8 @@ const createWindow = () => {
         mainWindow.webContents.openDevTools();
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+        // Force DevTools to open in compiled/production mode too for remote debugging
+        mainWindow.webContents.openDevTools();
     }
 };
 
@@ -349,7 +351,7 @@ app.on('ready', () => {
     // MDT TELEMETRY WATCHER ENGINE
     // ─────────────────────────────────────────────────────
     let resultWatcher = null;
-    let lastProcessedFile = null;
+    const fileLastProcessedTimes = new Map(); // filename -> timestamp
 
     ipcMain.handle('start-telemetry-watcher', (event, { gamePath }) => {
         if (!gamePath) return false;
@@ -360,9 +362,19 @@ app.on('ready', () => {
 
         try {
             resultWatcher = fs.watch(resultsPath, (eventType, filename) => {
-                if (filename && filename.endsWith('.xml') && filename !== lastProcessedFile) {
-                    lastProcessedFile = filename;
-                    setTimeout(() => processResultXML(path.join(resultsPath, filename)), 1500);
+                if (filename && filename.endsWith('.xml')) {
+                    const now = Date.now();
+                    const lastTime = fileLastProcessedTimes.get(filename) || 0;
+                    // Debounce of 3 seconds to avoid duplicate processing of the same quick save
+                    if (now - lastTime > 3000) {
+                        fileLastProcessedTimes.set(filename, now);
+                        console.log("Telemetry Engine: New result detected:", filename);
+                        
+                        // Delay to ensure file is completely written by the game
+                        setTimeout(() => {
+                            processResultXML(path.join(resultsPath, filename));
+                        }, 1500);
+                    }
                 }
             });
             return true;
@@ -388,6 +400,9 @@ app.on('ready', () => {
                 const bestLap      = parseFloat(block.match(/<BestLapTime>([^<]+)<\/BestLapTime>/i)?.[1] || "0");
                 const currentSetup = block.match(/<CurrentSetup>([^<]+)<\/CurrentSetup>/i)?.[1] || "Personalizado";
 
+                const isPlayerMatch = block.match(/<isPlayer>([^<]+)<\/isPlayer>/i);
+                const isPlayer = isPlayerMatch ? isPlayerMatch[1] === '1' : false;
+
                 let s1 = 0, s2 = 0, s3 = 0;
                 let topSpeed = parseFloat(block.match(/<TopSpeed>([^<]+)<\/TopSpeed>/i)?.[1] || "0");
 
@@ -397,11 +412,11 @@ app.on('ready', () => {
                     for (const lapBlock of laps) {
                         const lapTime = parseFloat(lapBlock.match(/>([^<]+)<\/Lap>/)?.[1] || "0");
                         if (Math.abs(lapTime - bestLap) < 0.002) {
-                            s1 = parseFloat(lapBlock.match(/s1="([^"]+)"/i)?.[1] || "0");
-                            s2 = parseFloat(lapBlock.match(/s2="([^"]+)"/i)?.[1] || "0");
-                            const rawS3 = lapBlock.match(/s3="([^"]+)"/i)?.[1];
+                            s1 = parseFloat(lapBlock.match(/s1="([^"]+)"/i)?.[1] || lapBlock.match(/<s1>([^<]+)<\/s1>/i)?.[1] || "0");
+                            s2 = parseFloat(lapBlock.match(/s2="([^"]+)"/i)?.[1] || lapBlock.match(/<s2>([^<]+)<\/s2>/i)?.[1] || "0");
+                            const rawS3 = lapBlock.match(/s3="([^"]+)"/i)?.[1] || lapBlock.match(/<s3>([^<]+)<\/s3>/i)?.[1];
                             s3 = rawS3 ? parseFloat(rawS3) : (lapTime - s1 - s2);
-                            const lapSpeed = parseFloat(lapBlock.match(/speed="([^"]+)"/i)?.[1] || "0");
+                            const lapSpeed = parseFloat(lapBlock.match(/speed="([^"]+)"/i)?.[1] || lapBlock.match(/<Speed>([^<]+)<\/Speed>/i)?.[1] || "0");
                             if (lapSpeed > topSpeed) topSpeed = lapSpeed;
                             break;
                         }
@@ -409,7 +424,10 @@ app.on('ready', () => {
                 }
                 if (topSpeed > 0 && topSpeed < 150) topSpeed = topSpeed * 3.6;
 
-                return { name, car, bestLap, currentSetup, sectors: { s1, s2, s3 }, topSpeed: topSpeed.toFixed(1) };
+                // Log every parsed driver directly to the main terminal for instant console diagnostics!
+                console.log(`Telemetry Engine: Watcher Parsed Driver: "${name}" | Best Lap: ${bestLap} | isPlayer: ${isPlayer}`);
+
+                return { name, car, bestLap, currentSetup, sectors: { s1, s2, s3 }, topSpeed: topSpeed.toFixed(1), isPlayer };
             }).filter(d => d.bestLap > 0 && d.name);
 
             if (mainWindow) {

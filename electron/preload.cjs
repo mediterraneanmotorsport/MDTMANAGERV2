@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clearResultsFolder: (data) => ipcRenderer.invoke('clear-results-folder', data),
     getLocalUrl: () => ipcRenderer.invoke('get-local-url'),
     onTelemetryUpdate: (callback) => ipcRenderer.on('telemetry-update', (_event, value) => callback(value)),
+    offTelemetryUpdate: () => ipcRenderer.removeAllListeners('telemetry-update'),
 
     // Live Telemetry — LMU REST API
     startLmuPolling: () => ipcRenderer.invoke('start-lmu-polling'),

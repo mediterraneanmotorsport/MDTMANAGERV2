@@ -334,16 +334,14 @@ const Dashboard = ({ gamePath, onSelectPath, userRole, circuits, categories, all
                     )}
 
                     {/* ── LEADERBOARD VIEW ── */}
-                    {activeView === 'leaderboard' && (
-                        <div className="wec-enter px-8 lg:px-12">
-                            <Leaderboard 
-                                selectedCircuit={selectedCircuit || circuits[0]} 
-                                selectedCategory={selectedCategory}
-                                categories={categories}
-                                gamePath={gamePath}
-                            />
-                        </div>
-                    )}
+                    <div className="wec-enter px-8 lg:px-12" style={{ display: activeView === 'leaderboard' ? 'block' : 'none' }}>
+                        <Leaderboard 
+                            selectedCircuit={selectedCircuit || circuits[0]} 
+                            selectedCategory={selectedCategory}
+                            categories={categories}
+                            gamePath={gamePath}
+                        />
+                    </div>
 
                     {/* ── LIVE TELEMETRY VIEW ── */}
                     {activeView === 'live' && (

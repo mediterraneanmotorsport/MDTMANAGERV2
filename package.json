@@ -1,7 +1,7 @@
 {
   "name": "mdt-setup-manager",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "MDT Setup Manager for Le Mans Ultimate",
   "author": "Team MDT",
   "type": "module",

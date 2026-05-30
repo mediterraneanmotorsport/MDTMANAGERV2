@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, getDocs, setDoc, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { sendDiscordNotification } from '../services/discordService';
+import { sendDiscordNotification, exportTelemetryCard } from '../services/discordService';
 
 const getCarLogo = (carName) => {
     const name = (carName || '').toLowerCase();
@@ -150,12 +150,36 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                 };
 
                 // 2. Carga de Datos (Prioridad Cloud para la UI y logs locales recientes)
-                const [cloudSnap, allLocal] = await Promise.all([
+                const [cloudSnap, allLocal, membersSnap, ignoredSnap, discordSnap] = await Promise.all([
                     getDocs(collection(db, "lmu_leaderboard")),
-                    window.electronAPI.scanLocalTelemetry({ gamePath })
+                    window.electronAPI.scanLocalTelemetry({ gamePath }),
+                    getDocs(collection(db, "mdt_members")),
+                    getDocs(collection(db, "ignored_records")),
+                    getDoc(doc(db, "settings", "discord")),
+                    window.electronAPI.startTelemetryWatcher({ gamePath })
                 ]);
 
-                console.log(`MDT Leaderboard: [INIT] Sincronizando logs con registros locales: ${allLocal?.length || 0}`);
+                // Poblar refs y estado de inmediato para evitar condiciones de carrera asíncronas
+                const initialMembers = new Set(membersSnap.docs.map(d => d.data().name ? d.data().name.trim().toLowerCase() : ""));
+                membersSetRef.current = initialMembers;
+                setTeamMembers(initialMembers);
+
+                const initialIgnored = new Set(ignoredSnap.docs.map(d => d.id));
+                const initialIgnoredTimes = {};
+                ignoredSnap.forEach(d => {
+                    initialIgnoredTimes[d.id] = d.data().bestLap;
+                });
+                ignoredRecordsRef.current = initialIgnored;
+                ignoredTimesMapRef.current = initialIgnoredTimes;
+                setIgnoredRecords(initialIgnored);
+
+                if (discordSnap.exists()) {
+                    webhookRef.current = discordSnap.data().url || null;
+                } else {
+                    webhookRef.current = null;
+                }
+
+                console.log(`MDT Leaderboard: [INIT] Sincronizando logs con registros locales y activando watcher: ${allLocal?.length || 0}`);
 
                 // 3. Procesar Datos de la NUBE con Consolidación Extrema
                 const cloudMap = {};
@@ -253,13 +277,24 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                         cloudMapRef.current[baseKey] = { ...uploadData, key };
 
                         // Notificación Discord (SOLO SI ES MEJORA REAL SOBRE TODO LO QUE TENEMOS EN TIEMPO REAL)
-                        const isPilotTracked = lap.isPlayer || membersSetRef.current.has(cleanPilotName.toLowerCase());
+                        const isPilotTracked = membersSetRef.current.has(cleanPilotName.toLowerCase());
                         const webhook = webhookRef.current;
+                        console.log(`MDT Sync: [DISCORD CHECK] Piloto: ${cleanPilotName} | isLive: ${isLive} | isPilotTracked: ${isPilotTracked} | webhook: ${webhook ? "Configurado" : "None"}`);
                         if (isLive && isPilotTracked && webhook) {
                             const notificationKey = `${cleanPilotName.toLowerCase()}_${fullLap.circuit}_${lap.bestLap}`;
                             if (!sentNotifications.current.has(notificationKey)) {
                                 if (!existingCloud || Number(lap.bestLap) < Number(existingCloud.bestLap) - 0.001) {
+                                    // Calcular la posición local en el leaderboard
+                                    const circuitEntries = Object.values(cloudMapRef.current)
+                                        .filter(e => e.circuit === fullLap.circuit && e.category === uploadData.category)
+                                        .sort((a, b) => a.bestLap - b.bestLap);
+                                    const newPos = circuitEntries.findIndex(e => e.name.toLowerCase() === cleanPilotName.toLowerCase()) + 1;
+
+                                    console.log(`MDT Sync: [DISCORD SEND] ¡Mejora confirmada! Enviando tarjeta visual de ${cleanPilotName} en ${fullLap.circuit} a Discord (Posición P${newPos})...`);
                                     sentNotifications.current.add(notificationKey);
+                                    const poleTime = circuitEntries[0]?.bestLap || lap.bestLap;
+                                    const gDelta = newPos === 1 ? 0 : Number(lap.bestLap) - Number(poleTime);
+
                                     sendDiscordNotification(webhook, {
                                         pilot: cleanPilotName,
                                         circuit: fullLap.circuit,
@@ -269,7 +304,9 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                                         improvement: existingCloud ? existingCloud.bestLap - lap.bestLap : 0,
                                         previousTime: existingCloud ? existingCloud.bestLap : null,
                                         sectors: lap.sectors,
-                                        topSpeed: lap.topSpeed
+                                        topSpeed: lap.topSpeed,
+                                        position: newPos,
+                                        globalDelta: gDelta
                                     });
                                 }
                             }
@@ -286,9 +323,8 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                         for (const l of allLocal) {
                             const pilotName = (l.name || '').split('#')[0].toLowerCase().trim();
                             const isMember = membersSetRef.current.has(pilotName);
-                            const shouldProcess = l.isPlayer || isMember;
-
-                            if (shouldProcess) {
+                            console.log(`MDT Sync: [HISTORIC SCAN] Piloto en archivo: "${pilotName}" (isMember: ${isMember})`);
+                            if (isMember) {
                                 await processLap(l, null, false);
                             }
                         }
@@ -304,12 +340,16 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
 
                 // 6. Listener de Telemetría en Tiempo Real
                 if (window.electronAPI.onTelemetryUpdate) {
+                    if (window.electronAPI.offTelemetryUpdate) {
+                        window.electronAPI.offTelemetryUpdate();
+                    }
                     window.electronAPI.onTelemetryUpdate(async data => {
-                        console.log("MDT Sync: Nueva telemetría en pista...");
+                        console.log(`MDT Sync: Nueva telemetría en pista... ${data.results?.length || 0} pilotos en el archivo.`);
                         for (const lap of data.results) {
                             const pilotName = (lap.name || '').split('#')[0].toLowerCase().trim();
                             const isMember = membersSetRef.current.has(pilotName);
-                            if (lap.isPlayer || isMember) {
+                            console.log(`MDT Sync: [REAL-TIME WATCH] Piloto en archivo: "${pilotName}" (isMember: ${isMember})`);
+                            if (isMember) {
                                 await processLap(lap, data.circuit, true);
                             }
                         }
@@ -323,6 +363,13 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
             }
         };
         syncAndLoadTelemetry();
+
+        return () => {
+            if (window.electronAPI && window.electronAPI.offTelemetryUpdate) {
+                console.log("MDT Leaderboard: Cleaning up telemetry update listeners...");
+                window.electronAPI.offTelemetryUpdate();
+            }
+        };
     }, [gamePath]);
 
     const availableCircuits = useMemo(() => {
@@ -406,6 +453,7 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
     }, [entries, filterCircuit, filterCategory, filterVersion, searchQuery, showOnlyMDT, teamMembers, ignoredRecords]);
 
     const TelemetryModal = ({ entry, onClose }) => {
+        const [exporting, setExporting] = useState(false);
         if (!entry) return null;
         return (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
@@ -457,7 +505,31 @@ const Leaderboard = ({ gamePath, selectedCircuit, selectedCategory: initialCateg
                         </div>
                         <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center">
                             <div className="text-wec-display text-[7px] text-white/15 uppercase tracking-wider">MDT Secure Link • {entry.date}</div>
-                            <button className="px-5 py-2 bg-wec-blue/10 text-wec-cyan border border-wec-blue/20 rounded-lg text-wec-display text-[8px] font-bold uppercase tracking-wider hover:bg-wec-blue hover:text-white transition-all">Exportar</button>
+                            <button
+                                disabled={exporting}
+                                onClick={async () => {
+                                    setExporting(true);
+                                    const mappedData = {
+                                        pilot: entry.name,
+                                        circuit: entry.circuit,
+                                        car: entry.car,
+                                        lapTime: entry.bestLap,
+                                        category: entry.category,
+                                        sectors: entry.sectors,
+                                        topSpeed: entry.topSpeed,
+                                        improvement: 0,
+                                        previousTime: null,
+                                        isTest: false,
+                                        position: entry.globalPos,
+                                        globalDelta: entry.globalDelta
+                                    };
+                                    await exportTelemetryCard(mappedData);
+                                    setExporting(false);
+                                }}
+                                className={`px-5 py-2 rounded-lg text-wec-display text-[8px] font-bold uppercase tracking-wider transition-all ${exporting ? 'bg-white/5 text-white/30 border border-white/5 cursor-wait' : 'bg-wec-blue/10 text-wec-cyan border border-wec-blue/20 hover:bg-wec-blue hover:text-white'}`}
+                            >
+                                {exporting ? 'Generando...' : 'Exportar'}
+                            </button>
                         </div>
                     </div>
                 </div>
