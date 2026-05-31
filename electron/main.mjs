@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import https from 'https';
 import http from 'http';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import os from 'os';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -554,6 +554,90 @@ app.on('ready', () => {
             return items.map(i => i.name);
         } catch (e) { console.error("Error listing directory:", e); return []; }
     });
+
+    ipcMain.handle('detect-wheelbase', async () => {
+        return new Promise((resolve) => {
+            const cmd = `Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'Gamepad' -or $_.Name -like '*wheel*' -or $_.Name -like '*steering*' -or $_.Name -like '*moza*' -or $_.Name -like '*fanatec*' -or $_.Name -like '*simucube*' -or $_.Name -like '*thrustmaster*' -or $_.Name -like '*logitech*' } | Select-Object -Property Name, DeviceID | ConvertTo-Json`;
+            exec(`powershell -NoProfile -Command "${cmd.replace(/"/g, '\\"')}"`, (err, stdout, stderr) => {
+                if (err || !stdout.trim()) {
+                    resolve({ detected: false, name: null });
+                    return;
+                }
+                try {
+                    let parsed = JSON.parse(stdout);
+                    if (!parsed) {
+                        resolve({ detected: false, name: null });
+                        return;
+                    }
+                    if (!Array.isArray(parsed)) {
+                        parsed = [parsed];
+                    }
+                    
+                    for (const dev of parsed) {
+                        if (!dev || !dev.Name) continue;
+                        const name = String(dev.Name).toLowerCase();
+                        if (name.includes('moza r3')) {
+                            resolve({ detected: true, name: 'MOZA R3', torque: 3.9, type: 'dd_midrange', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('moza r5')) {
+                            resolve({ detected: true, name: 'MOZA R5', torque: 5.5, type: 'dd_midrange', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('moza r9')) {
+                            resolve({ detected: true, name: 'MOZA R9', torque: 9.0, type: 'dd_midrange', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('moza r12')) {
+                            resolve({ detected: true, name: 'MOZA R12', torque: 12.0, type: 'dd_midrange', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('moza r16')) {
+                            resolve({ detected: true, name: 'MOZA R16', torque: 16.0, type: 'dd_highend', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('moza r21')) {
+                            resolve({ detected: true, name: 'MOZA R21', torque: 21.0, type: 'dd_highend', brand: 'MOZA' });
+                            return;
+                        }
+                        else if (name.includes('simucube 2 pro') || name.includes('simucube 2')) {
+                            resolve({ detected: true, name: 'Simucube 2 Pro', torque: 25.0, type: 'dd_highend', brand: 'Simucube' });
+                            return;
+                        }
+                        else if (name.includes('csl dd') || name.includes('gran turismo dd')) {
+                            resolve({ detected: true, name: 'Fanatec CSL DD', torque: 8.0, type: 'dd_midrange', brand: 'Fanatec' });
+                            return;
+                        }
+                        else if (name.includes('dd1') || name.includes('dd2') || name.includes('podium dd')) {
+                            resolve({ detected: true, name: 'Fanatec Podium DD', torque: 20.0, type: 'dd_highend', brand: 'Fanatec' });
+                            return;
+                        }
+                        else if (name.includes('g29') || name.includes('g920') || name.includes('g923') || name.includes('driving force')) {
+                            resolve({ detected: true, name: 'Logitech G29', torque: 2.2, type: 'gear_drive', brand: 'Logitech' });
+                            return;
+                        }
+                        else if (name.includes('g pro')) {
+                            resolve({ detected: true, name: 'Logitech G PRO', torque: 11.0, type: 'dd_midrange', brand: 'Logitech' });
+                            return;
+                        }
+                        else if (name.includes('t300') || name.includes('tx leather') || name.includes('thrustmaster')) {
+                            resolve({ detected: true, name: 'Thrustmaster T300', torque: 3.9, type: 'belt_drive', brand: 'Thrustmaster' });
+                            return;
+                        }
+                    }
+                    
+                    const firstDev = parsed.find(d => d && d.Name);
+                    if (firstDev) {
+                        resolve({ detected: true, name: firstDev.Name, torque: 5.0, type: 'dd_midrange', brand: 'Generic' });
+                    } else {
+                        resolve({ detected: false, name: null });
+                    }
+                } catch (e) {
+                    resolve({ detected: false, name: null });
+                }
+            });
+        });
+    });
 });
 
 
@@ -826,7 +910,9 @@ function startLmuSharedMemory() {
                                     throttle: v.throttle, 
                                     brake: v.brake,
                                     mgukState: v.mgukState,
-                                    wheels: v.wheels 
+                                    wheels: v.wheels,
+                                    steeringTorque: v.steeringTorque,
+                                    ffbTorque: v.ffbTorque
                                 };
                                 mainWindow.webContents.send('lmu-local-telemetry', payload);
                                 if (global.broadcastToSse) global.broadcastToSse('lmu-local-telemetry', payload);

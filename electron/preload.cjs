@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     toggleFullScreen: () => ipcRenderer.invoke('toggle-fullscreen'),
     clearResultsFolder: (data) => ipcRenderer.invoke('clear-results-folder', data),
     getLocalUrl: () => ipcRenderer.invoke('get-local-url'),
+    detectWheelbase: () => ipcRenderer.invoke('detect-wheelbase'),
     onTelemetryUpdate: (callback) => ipcRenderer.on('telemetry-update', (_event, value) => callback(value)),
     offTelemetryUpdate: () => ipcRenderer.removeAllListeners('telemetry-update'),
 

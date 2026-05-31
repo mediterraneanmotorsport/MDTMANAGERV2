@@ -48,7 +48,9 @@ while True:
                 "fuel": (int(score.mFuelFraction) / 255.0) * 100.0,
                 "isPlayer": score.mIsPlayer == 1,
                 "mgukState": int(telem.mElectricBoostMotorState),
-                "wheels": wheels
+                "wheels": wheels,
+                "steeringTorque": float(telem.mSteeringShaftTorque),
+                "ffbTorque": float(data.generic.FFBTorque)
             })
             
         print(json.dumps({"type": "telemetry", "data": vehicles}), flush=True)
