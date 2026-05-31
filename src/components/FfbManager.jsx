@@ -4,74 +4,97 @@ const PRESETS = {
     dd_highend: {
         id: 'dd_highend',
         name: 'Direct Drive High-End',
-        description: 'Simucube 2, Fanatec DD2, Moza R21, Asetek Invicta. Detalle físico bruto sin filtros invasivos.',
+        description: 'Simucube 2 Pro/Ultimate, Fanatec DD2, Moza R21, Asetek Invicta. Fuerza física bruta a 25Nm y máximo detalle dinámico.',
         settings: {
             isActive: true,
             masterGain: 55,
-            maxTorqueRef: 75,
+            maxTorqueRef: 25,
             smoothing: 1,
             understeerSlip: 40,
             staticNoise: 10,
             antiOscillation: 50,
+            curbEffect: 50,
+            roadEffect: 45,
+            bumpDampening: 20,
+            wheelWeight: 45,
             invertFfb: false
         }
     },
     dd_midrange: {
         id: 'dd_midrange',
         name: 'Direct Drive Gama Media',
-        description: 'Moza R9/R12, Fanatec CSL DD, Logitech G PRO, Fanatec ClubSport DD. Balance óptimo de detalle y peso.',
+        description: 'Moza R9/R12, Fanatec CSL DD (8Nm), Logitech G PRO, ClubSport DD. Configurado a 9Nm para un balance perfecto de peso y texturas.',
         settings: {
             isActive: true,
             masterGain: 70,
-            maxTorqueRef: 60,
+            maxTorqueRef: 9,
             smoothing: 4,
             understeerSlip: 50,
             staticNoise: 12,
             antiOscillation: 60,
+            curbEffect: 65,
+            roadEffect: 55,
+            bumpDampening: 40,
+            wheelWeight: 55,
             invertFfb: false
         }
     },
     belt_drive: {
         id: 'belt_drive',
         name: 'Transmisión por Correa',
-        description: 'Thrustmaster T300/TX, Fanatec CS Elite, Thrustmaster TS-PC. Refuerzo de detalles de fricción y asfalto.',
+        description: 'Thrustmaster T300/TX, Fanatec CS Elite, TS-PC. Configurado a 4.2Nm para amplificar el agarre sin quemar el motor.',
         settings: {
             isActive: true,
             masterGain: 85,
-            maxTorqueRef: 45,
+            maxTorqueRef: 4.2,
             smoothing: 8,
             understeerSlip: 55,
             staticNoise: 14,
             antiOscillation: 40,
+            curbEffect: 75,
+            roadEffect: 65,
+            bumpDampening: 50,
+            wheelWeight: 35,
             invertFfb: false
         }
     },
     gear_drive: {
         id: 'gear_drive',
         name: 'Transmisión por Engranajes',
-        description: 'Logitech G29, G920, G923, G27. Suavizado alto para evitar ruidos mecánicos y traqueteo de engranajes.',
+        description: 'Logitech G29, G920, G923, G27. Configurado a 2.2Nm con amortiguación alta para evitar los ruidos metálicos y el traqueteo.',
         settings: {
             isActive: true,
             masterGain: 95,
-            maxTorqueRef: 35,
+            maxTorqueRef: 2.2,
             smoothing: 12,
             understeerSlip: 60,
             staticNoise: 15,
             antiOscillation: 20,
+            curbEffect: 40,
+            roadEffect: 35,
+            bumpDampening: 75,
+            wheelWeight: 20,
             invertFfb: false
         }
     }
 };
 
 const FfbManager = ({ gamePath }) => {
-    // FFB State Variables
+    // Core FFB State Variables
     const [isActive, setIsActive] = useState(true);
     const [masterGain, setMasterGain] = useState(70);
-    const [maxTorqueRef, setMaxTorqueRef] = useState(60);
+    const [maxTorqueRef, setMaxTorqueRef] = useState(9); // 9 Nm as default (CSL DD / R9 mid-range)
     const [smoothing, setSmoothing] = useState(4);
     const [understeerSlip, setUndersteerSlip] = useState(50);
     const [staticNoise, setStaticNoise] = useState(12);
     const [antiOscillation, setAntiOscillation] = useState(60);
+    
+    // New Advanced Sliders requested by the user
+    const [curbEffect, setCurbEffect] = useState(65);       // Pianos
+    const [roadEffect, setRoadEffect] = useState(55);       // Efectos de carretera (textura asfalto)
+    const [bumpDampening, setBumpDampening] = useState(40); // Amortiguación de baches
+    const [wheelWeight, setWheelWeight] = useState(55);     // Inercia / Peso del volante
+    
     const [invertFfb, setInvertFfb] = useState(false);
 
     const [activePreset, setActivePreset] = useState('dd_midrange');
@@ -86,11 +109,17 @@ const FfbManager = ({ gamePath }) => {
                 const parsed = JSON.parse(saved);
                 setIsActive(parsed.isActive ?? true);
                 setMasterGain(parsed.masterGain ?? 70);
-                setMaxTorqueRef(parsed.maxTorqueRef ?? 60);
+                setMaxTorqueRef(parsed.maxTorqueRef ?? 9);
                 setSmoothing(parsed.smoothing ?? 4);
                 setUndersteerSlip(parsed.understeerSlip ?? 50);
                 setStaticNoise(parsed.staticNoise ?? 12);
                 setAntiOscillation(parsed.antiOscillation ?? 60);
+                
+                setCurbEffect(parsed.curbEffect ?? 65);
+                setRoadEffect(parsed.roadEffect ?? 55);
+                setBumpDampening(parsed.bumpDampening ?? 40);
+                setWheelWeight(parsed.wheelWeight ?? 55);
+                
                 setInvertFfb(parsed.invertFfb ?? false);
                 setActivePreset(parsed.activePreset ?? 'custom');
             } catch (e) {
@@ -109,6 +138,10 @@ const FfbManager = ({ gamePath }) => {
             understeerSlip,
             staticNoise,
             antiOscillation,
+            curbEffect,
+            roadEffect,
+            bumpDampening,
+            wheelWeight,
             invertFfb,
             activePreset: newPresetName
         };
@@ -131,6 +164,12 @@ const FfbManager = ({ gamePath }) => {
         setUndersteerSlip(s.understeerSlip);
         setStaticNoise(s.staticNoise);
         setAntiOscillation(s.antiOscillation);
+        
+        setCurbEffect(s.curbEffect);
+        setRoadEffect(s.roadEffect);
+        setBumpDampening(s.bumpDampening);
+        setWheelWeight(s.wheelWeight);
+        
         setInvertFfb(s.invertFfb);
         setActivePreset(presetKey);
 
@@ -193,16 +232,16 @@ const FfbManager = ({ gamePath }) => {
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Calculate current parameters impact
-            // FFB Limit threshold is inversely proportional to Max Torque Ref setting.
-            // A lower maxTorqueRef (e.g. 35 Nm) means a lower physical force ceiling -> easier to clip!
-            // FFB threshold height in pixels from center
-            const ceilingThreshold = 100 - (maxTorqueRef * 0.4); 
+            // Calculate clipping ceiling.
+            // A lower maxTorqueRef (e.g. 2.2 Nm) means a lower physical force ceiling -> easier to clip!
+            // Range is now properly scaled from 1 Nm to 32 Nm.
+            // threshold height in pixels from center
+            const ceilingThreshold = 30 + (maxTorqueRef * 2.2); 
             const limitPos = centerLine - ceilingThreshold;
             const limitNeg = centerLine + ceilingThreshold;
 
             // Draw clipping limit threshold red lines
-            ctx.strokeStyle = '#ff4d4d';
+            ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.moveTo(0, limitPos);
@@ -212,41 +251,50 @@ const FfbManager = ({ gamePath }) => {
             ctx.stroke();
 
             // Label the clipping lines
-            ctx.fillStyle = 'rgba(255, 77, 77, 0.6)';
+            ctx.fillStyle = 'rgba(255, 77, 77, 0.5)';
             ctx.font = 'bold 8px "Antonio", sans-serif';
             ctx.textAlign = 'right';
-            ctx.fillText('LÍMITE DE RECORTE (CLIPPING)', canvas.width - 15, limitPos - 4);
-            ctx.fillText('-LÍMITE DE RECORTE (CLIPPING)', canvas.width - 15, limitNeg + 10);
+            ctx.fillText(`LÍMITE CLIPPING (${maxTorqueRef.toFixed(1)} Nm)`, canvas.width - 15, limitPos - 4);
+            ctx.fillText(`-LÍMITE CLIPPING (-${maxTorqueRef.toFixed(1)} Nm)`, canvas.width - 15, limitNeg + 10);
 
             // Physics telemetry generator loop
             if (isActive) {
                 timeStep += 0.055;
                 
                 // Base sine wave representing steering input load (cornering)
-                const steeringInput = Math.sin(timeStep * 0.4) * 0.45;
+                // Affected by wheelWeight (adds a bit of damping/inertia, smoothing the input transition)
+                const inertiaWeight = Math.max(0.1, wheelWeight / 100);
+                const steeringSpeed = 0.4 / (1.0 + inertiaWeight * 0.5);
+                const steeringInput = Math.sin(timeStep * steeringSpeed) * (0.45 + inertiaWeight * 0.15);
                 
-                // Add high frequency road noise & suspension bumps (reduced if smoothing is high)
-                const noiseFactor = Math.max(0.1, (20 - smoothing) / 10);
-                const roadVibration = (Math.sin(timeStep * 4.2) * 0.12 + Math.cos(timeStep * 8.5) * 0.08) * noiseFactor;
+                // Add high frequency road noise & suspension bumps (roadEffect adds micro vibration)
+                const roadFactor = roadEffect / 50; 
+                const noiseFactor = Math.max(0.05, (24 - smoothing) / 16);
+                const roadVibration = (Math.sin(timeStep * 5.5) * 0.09 + Math.cos(timeStep * 11) * 0.06) * noiseFactor * roadFactor;
                 
-                // Simulated curb contact bump spike (random bursts representing track boundaries)
+                // Curb contact bump spikes (pianos) - amplitude regulated by curbEffect setting
                 let curbBump = 0;
-                if (Math.sin(timeStep * 0.8) > 0.82) {
-                    curbBump = Math.cos(timeStep * 24) * 0.3 * noiseFactor;
+                const curbFactor = curbEffect / 60;
+                if (Math.sin(timeStep * 0.95) > 0.80) {
+                    curbBump = Math.cos(timeStep * 28) * 0.32 * noiseFactor * curbFactor;
                 }
+
+                // Bump dampening: attenuates sharp high-frequency transient spikes
+                const dampeningFactor = Math.max(0.2, (100 - bumpDampening) / 100);
+                const finalTransientBumps = curbBump * dampeningFactor;
 
                 // Understeer slip calculation: reduces steering torque if cornering load exceeds a threshold
                 let gripMultiplier = 1.0;
-                const slipZone = 0.35;
+                const slipZone = 0.38;
                 if (Math.abs(steeringInput) > slipZone) {
                     // Understeer slip drops the steering torque to simulate loss of grip
                     const excess = Math.abs(steeringInput) - slipZone;
                     const slipSensitivity = understeerSlip / 100;
-                    gripMultiplier = 1.0 - (excess * 1.4 * slipSensitivity);
+                    gripMultiplier = 1.0 - (excess * 1.55 * slipSensitivity);
                 }
 
                 // Final torque value proportional to Master Gain setting
-                const rawFfbSignal = (steeringInput * gripMultiplier + roadVibration + curbBump) * (masterGain / 50);
+                const rawFfbSignal = (steeringInput * gripMultiplier + roadVibration + finalTransientBumps) * (masterGain / 45);
                 
                 // Push new point and shift older points
                 telemetryPoints.shift();
@@ -270,7 +318,7 @@ const FfbManager = ({ gamePath }) => {
                 // Apply invert toggle
                 const signal = invertFfb ? -telemetryPoints[i] : telemetryPoints[i];
                 
-                let yOffset = signal * 75; // Scale for drawing
+                let yOffset = signal * 68; // Scale for drawing
                 
                 // Visual clipping clamp
                 if (yOffset > ceilingThreshold) {
@@ -297,8 +345,8 @@ const FfbManager = ({ gamePath }) => {
             ctx.fillStyle = 'rgba(5, 5, 8, 0.82)';
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
             ctx.lineWidth = 1;
-            ctx.fillRect(15, 12, 260, 22);
-            ctx.strokeRect(15, 12, 260, 22);
+            ctx.fillRect(15, 12, 270, 22);
+            ctx.strokeRect(15, 12, 270, 22);
 
             ctx.fillStyle = !isActive ? '#ff6b2b' : (isCurrentlyClipping ? '#ff4d4d' : '#00ff66');
             ctx.beginPath();
@@ -310,7 +358,7 @@ const FfbManager = ({ gamePath }) => {
             ctx.textAlign = 'left';
             const statusLabel = !isActive 
                 ? 'MDT FFB DESACTIVADO (FLATLINE IDLE)' 
-                : (isCurrentlyClipping ? '⚠️ ADVERTENCIA: RECORTE ACTIVO (REDUCE GANANCIA)' : '🟢 SEÑAL DE FUERZA DE ALTA FIDELIDAD (MDT FFB OK)');
+                : (isCurrentlyClipping ? '⚠️ ADVERTENCIA: CLIPPING (BAJA FUERZA O SUBE Nm)' : '🟢 SEÑAL DE FUERZA DE ALTA FIDELIDAD (MDT FFB OK)');
             ctx.fillText(statusLabel, 38, 26);
 
             // FPS loop
@@ -322,7 +370,7 @@ const FfbManager = ({ gamePath }) => {
         return () => {
             cancelAnimationFrame(animationId);
         };
-    }, [isActive, masterGain, maxTorqueRef, smoothing, understeerSlip, invertFfb]);
+    }, [isActive, masterGain, maxTorqueRef, smoothing, understeerSlip, invertFfb, curbEffect, roadEffect, bumpDampening, wheelWeight]);
 
     return (
         <div className="space-y-6">
@@ -338,7 +386,7 @@ const FfbManager = ({ gamePath }) => {
                             MDT <span className="text-wec-cyan">FFB OPTIMIZER</span>
                         </h1>
                         <p className="text-xs text-white/30 tracking-wide">
-                            Integración directa con el motor de físicas de Le Mans Ultimate. Simplifica el tacto de tu volante y elimina vibraciones.
+                            Ajustes calibrados de Force Feedback para Le Mans Ultimate. Configura la física exacta de tu base en un clic.
                         </p>
                     </div>
 
@@ -351,7 +399,7 @@ const FfbManager = ({ gamePath }) => {
                             <div className="text-[8px] text-white/20 font-medium">Intercepción de físicas LMU</div>
                         </div>
 
-                        {/* Beautiful Custom Toggle Switch */}
+                        {/* Switch Toggle */}
                         <button
                             onClick={() => {
                                 setIsActive(!isActive);
@@ -395,7 +443,7 @@ const FfbManager = ({ gamePath }) => {
                             />
                         </div>
                         <div className="px-4 py-3 bg-white/[0.01] text-[10px] text-white/30 text-center italic border-t border-white/5">
-                            Visualiza la oscilación de fuerza. Si la línea toca los límites rojos superiores/inferiores, sufrirás de saturación (clipping).
+                            Visualiza la oscilación de fuerza. Si la curva toca las líneas límites rojas de Nm, el FFB se aplanará y perderás detalle físico.
                         </div>
                     </div>
 
@@ -403,7 +451,7 @@ const FfbManager = ({ gamePath }) => {
                     <div className="wec-glass p-5 rounded-xl border border-white/5 space-y-4">
                         <div className="space-y-1">
                             <h3 className="text-xs font-bold text-white uppercase tracking-wider">Perfiles de Volante (Presets)</h3>
-                            <p className="text-[10px] text-white/30">Carga en un clic la configuración ideal para tu base física.</p>
+                            <p className="text-[10px] text-white/30">Carga en un clic la calibración de torque real de tu base física.</p>
                         </div>
 
                         <div className="grid grid-cols-1 gap-2.5">
@@ -453,11 +501,11 @@ const FfbManager = ({ gamePath }) => {
                             </div>
                         </div>
 
-                        {/* Slider Controls Container */}
+                        {/* Slider Controls Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                             
                             {/* 1. Ganancia Maestra */}
-                            <div className={`space-y-2 border-b md:border-b-0 border-white/5 pb-5 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
                                     <label className="text-[10px] font-bold text-white uppercase tracking-wider">Ganancia Maestra (FFB Strength)</label>
                                     <span className="text-[10px] font-bold text-wec-cyan" style={{ fontFamily: 'var(--font-data)' }}>{masterGain}%</span>
@@ -474,36 +522,125 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-wec-cyan bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Controla la fuerza global que sentirás en el volante. Si notas la dirección excesivamente pesada o demasiado blanda, ajústala aquí.
+                                    Controla la fuerza global que sentirás en el volante. Si notas la dirección excesivamente pesada o blanda, ajústala aquí.
                                 </p>
                             </div>
 
-                            {/* 2. Torque Máximo de Referencia */}
-                            <div className={`space-y-2 border-b md:border-b-0 border-white/5 pb-5 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                            {/* 2. Fuerza Máxima en Nm */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Límite de Torque (Max Torque Ref)</label>
-                                    <span className="text-[10px] font-bold text-wec-orange" style={{ fontFamily: 'var(--font-data)' }}>{maxTorqueRef} Nm</span>
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Fuerza Máxima de Base (Max Torque)</label>
+                                    <span className="text-[10px] font-bold text-wec-orange" style={{ fontFamily: 'var(--font-data)' }}>{maxTorqueRef.toFixed(1)} Nm</span>
                                 </div>
                                 <input
                                     type="range"
-                                    min="10"
-                                    max="100"
+                                    min="1.0"
+                                    max="32.0"
+                                    step="0.1"
                                     value={maxTorqueRef}
                                     onChange={(e) => {
-                                        setMaxTorqueRef(parseInt(e.target.value));
+                                        setMaxTorqueRef(parseFloat(e.target.value));
                                         handleTweak();
                                     }}
                                     className="w-full accent-wec-orange bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Define el límite físico de fuerza de tu volante. **Aumenta este valor (ej: 60-80 Nm)** si sufres de sacudidas violentas en rectas. Disminúyelo en volantes básicos para ganar peso.
+                                    Configura la **fuerza física máxima real en Nm** de tu base de volante. G29/G923 son ~2.2Nm, CSL DD es 5-8Nm, Moza R9 es 9Nm, Simucube es 25Nm.
                                 </p>
                             </div>
 
-                            {/* 3. Suavizado de Dirección */}
-                            <div className={`space-y-2 border-b md:border-b-0 border-white/5 pb-5 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                            {/* 3. Pianos (Curb Effects) */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Suavizado de Dirección (Smoothing)</label>
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Fuerza de Pianos (Curb Effects)</label>
+                                    <span className="text-[10px] font-bold text-wec-cyan" style={{ fontFamily: 'var(--font-data)' }}>{curbEffect}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={curbEffect}
+                                    onChange={(e) => {
+                                        setCurbEffect(parseInt(e.target.value));
+                                        handleTweak();
+                                    }}
+                                    className="w-full accent-wec-cyan bg-white/5 rounded-lg h-1"
+                                />
+                                <p className="text-[9px] leading-relaxed text-white/20">
+                                    Controla la intensidad de la vibración táctil al pasar sobre los pianos y límites del circuito. Aumenta para una respuesta más agresiva y directa.
+                                </p>
+                            </div>
+
+                            {/* 4. Efectos de Carretera (Road Textures) */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Textura del Asfalto (Road Effects)</label>
+                                    <span className="text-[10px] font-bold text-white/60" style={{ fontFamily: 'var(--font-data)' }}>{roadEffect}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={roadEffect}
+                                    onChange={(e) => {
+                                        setRoadEffect(parseInt(e.target.value));
+                                        handleTweak();
+                                    }}
+                                    className="w-full accent-white/40 bg-white/5 rounded-lg h-1"
+                                />
+                                <p className="text-[9px] leading-relaxed text-white/20">
+                                    Añade una vibración fina tridimensional que simula el grano del asfalto y la rugosidad de la pista, incrementando la sensación de velocidad.
+                                </p>
+                            </div>
+
+                            {/* 5. Amortiguación de Baches */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Amortiguador de Baches (Bump Dampening)</label>
+                                    <span className="text-[10px] font-bold text-wec-orange" style={{ fontFamily: 'var(--font-data)' }}>{bumpDampening}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={bumpDampening}
+                                    onChange={(e) => {
+                                        setBumpDampening(parseInt(e.target.value));
+                                        handleTweak();
+                                    }}
+                                    className="w-full accent-wec-orange bg-white/5 rounded-lg h-1"
+                                />
+                                <p className="text-[9px] leading-relaxed text-white/20">
+                                    Suaviza los latigazos secos e impactos bruscos producidos por baches profundos o zanjas en pista. Protege la mecánica del aro y tus muñecas.
+                                </p>
+                            </div>
+
+                            {/* 6. Inercia y Peso del Volante */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Peso de Dirección (Inertia & Weight)</label>
+                                    <span className="text-[10px] font-bold text-white/60" style={{ fontFamily: 'var(--font-data)' }}>{wheelWeight}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={wheelWeight}
+                                    onChange={(e) => {
+                                        setWheelWeight(parseInt(e.target.value));
+                                        handleTweak();
+                                    }}
+                                    className="w-full accent-white/40 bg-white/5 rounded-lg h-1"
+                                />
+                                <p className="text-[9px] leading-relaxed text-white/20">
+                                    Añade una inercia física simulada a la columna de dirección. Hace que el volante se sienta más denso y natural, reduciendo la flotabilidad en rectas.
+                                </p>
+                            </div>
+
+                            {/* 7. Suavizado de Dirección */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Suavizado del Eje (Smoothing)</label>
                                     <span className="text-[10px] font-bold text-white/60" style={{ fontFamily: 'var(--font-data)' }}>{smoothing} ms</span>
                                 </div>
                                 <input
@@ -518,14 +655,14 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-white/40 bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Filtra las vibraciones ásperas y el ruido de alta frecuencia. **Un valor de 3ms a 8ms** es el balance óptimo para notar las texturas de los pianos sin traqueteos mecánicos.
+                                    Dampen general del eje para bases ruidosas. Reduce el traqueteo y ruidos agudos sin enturbiar las fuerzas esenciales de adherencia.
                                 </p>
                             </div>
 
-                            {/* 4. Efecto de Subviraje */}
-                            <div className={`space-y-2 border-b md:border-b-0 border-white/5 pb-5 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                            {/* 8. Efecto de Subviraje */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Pérdida de Grip (Understeer Slip)</label>
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Pérdida de Grip en Subviraje</label>
                                     <span className="text-[10px] font-bold text-wec-cyan" style={{ fontFamily: 'var(--font-data)' }}>{understeerSlip}%</span>
                                 </div>
                                 <input
@@ -540,14 +677,14 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-wec-cyan bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Atenúa la fuerza del volante cuando las ruedas delanteras deslizan (subviraje). Sentirás que **la dirección se aligera de golpe**, avisándote al instante de que el coche patina.
+                                    Atenúa la fuerza de resistencia del volante cuando el neumático delantero desliza en curva. Notarás que el aro se vuelve ligero al patinar.
                                 </p>
                             </div>
 
-                            {/* 5. Filtro de Ruido Estático */}
-                            <div className={`space-y-2 border-b md:border-b-0 border-white/5 pb-5 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
+                            {/* 9. Filtro Estático */}
+                            <div className={`space-y-2 border-b border-white/5 pb-4 md:pb-0 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Filtro de Vibración Motor (Static Filter)</label>
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Vibración Estática del Motor</label>
                                     <span className="text-[10px] font-bold text-white/60" style={{ fontFamily: 'var(--font-data)' }}>{staticNoise} Hz</span>
                                 </div>
                                 <input
@@ -562,14 +699,14 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-white/40 bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Elimina el zumbido constante y las vibraciones finas del motor cuando el vehículo está parado en el Pitlane o rodando a muy bajas velocidades.
+                                    Elimina la frecuencia del zumbido o temblor del motor cuando estás en ralentí parado en boxes o a bajísima velocidad.
                                 </p>
                             </div>
 
-                            {/* 6. Atenuador Anti-Oscilaciones */}
+                            {/* 10. Protección de Manos Libres */}
                             <div className={`space-y-2 ${!isActive ? 'opacity-35 pointer-events-none' : ''}`}>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Protección de Manos Libres (Hands-Off)</label>
+                                    <label className="text-[10px] font-bold text-white uppercase tracking-wider">Atenuación Anti-Oscilación (Hands-Off)</label>
                                     <span className="text-[10px] font-bold text-wec-orange" style={{ fontFamily: 'var(--font-data)' }}>{antiOscillation}%</span>
                                 </div>
                                 <input
@@ -584,7 +721,7 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-wec-orange bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Filtro de seguridad inteligente. **Atenúa las fuerzas rápidamente** si detecta que has soltado el volante en una recta, evitando que el aro oscile violentamente solo.
+                                    Detecta instantáneamente si has soltado las manos del aro en recta y mitiga las fuerzas del motor para impedir sacudidas cíclicas peligrosas.
                                 </p>
                             </div>
                         </div>
@@ -615,7 +752,7 @@ const FfbManager = ({ gamePath }) => {
                                 <div>
                                     <label className="text-[10px] font-bold text-white uppercase tracking-wider block">Invertir Fuerzas FFB</label>
                                     <span className="text-[9px] text-white/20 block leading-tight">
-                                        Activar **solo** si al girar el volante tiende a irse solo hacia el exterior.
+                                        Activar **solo** si al girar el volante tiende a irse solo hacia el exterior de la curva.
                                     </span>
                                 </div>
                             </div>
