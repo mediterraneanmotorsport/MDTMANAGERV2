@@ -101,15 +101,35 @@ const FfbManager = ({ gamePath }) => {
     const [saveStatus, setSaveStatus] = useState('');
     const canvasRef = useRef(null);
 
-    // Live Game Telemetry State
-    const [isLiveTelemetry, setIsLiveTelemetry] = useState(false);
+    // LMUFFB path on pilot's machine (pre-loaded with detected path)
+    const [ffbPath, setFfbPath] = useState(
+        localStorage.getItem('mdt_lmu_ffb_path') || 'C:\\Users\\Rescate\\Downloads\\lmuffb-0.7.385\\lmuffb-0.7.385'
+    );
+
+    // Wheel detection state
     const [detectedWheel, setDetectedWheel] = useState({ detected: false, name: null, torque: null, type: null, brand: null });
     const [scanningWheel, setScanningWheel] = useState(false);
 
-    // Refs for holding latest fast live values to feed into the 60fps canvas loop
+    // Fast refs for 60fps canvas animation loop without triggering React re-renders
     const lastTelemetryTimeRef = useRef(0);
     const lastFfbValueRef = useRef(0);
     const lastSteeringValueRef = useRef(0);
+
+    // Start local LMU shared memory polling when FfbManager is mounted!
+    useEffect(() => {
+        if (window.electronAPI && window.electronAPI.startLmuPolling) {
+            console.log('[MDT FFB] Activando polling de memoria compartida LMU...');
+            window.electronAPI.startLmuPolling();
+        }
+
+        // Clean up on unmount
+        return () => {
+            if (window.electronAPI && window.electronAPI.stopLmuPolling) {
+                console.log('[MDT FFB] Deteniendo polling LMU...');
+                window.electronAPI.stopLmuPolling();
+            }
+        };
+    }, []);
 
     // Load settings from localStorage on mount and start wheelbase detection
     useEffect(() => {
@@ -141,24 +161,16 @@ const FfbManager = ({ gamePath }) => {
         handleDetectWheelbase();
     }, []);
 
-    // Subscribe to true real-time local telemetry from shared memory
+    // Subscribe to fast local telemetry from shared memory
     useEffect(() => {
         if (window.electronAPI && window.electronAPI.onLmuLocalTelemetry) {
             window.electronAPI.onLmuLocalTelemetry((data) => {
                 if (data) {
-                    // Update latest telemetry refs
                     lastTelemetryTimeRef.current = Date.now();
-                    
                     // LMU outputs ffbTorque between -1.0 and 1.0 (sometimes slightly over).
-                    // Or steeringTorque representing physical shaft load.
-                    // We'll normalize it for display.
                     const rawFfb = data.ffbTorque || (data.steeringTorque ? data.steeringTorque / 15.0 : 0);
                     lastFfbValueRef.current = rawFfb;
                     lastSteeringValueRef.current = data.steeringTorque || 0;
-                    
-                    if (!isLiveTelemetry) {
-                        setIsLiveTelemetry(true);
-                    }
                 }
             });
         }
@@ -168,27 +180,13 @@ const FfbManager = ({ gamePath }) => {
                 window.electronAPI.offLmuLocalTelemetry();
             }
         };
-    }, [isLiveTelemetry]);
-
-    // Check if live telemetry is timed out (game closed / paused)
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (Date.now() - lastTelemetryTimeRef.current > 2000) {
-                if (isLiveTelemetry) {
-                    setIsLiveTelemetry(false);
-                }
-            }
-        }, 1500);
-
-        return () => clearInterval(interval);
-    }, [isLiveTelemetry]);
+    }, []);
 
     // USB Hardware Wheelbase Detection
     const handleDetectWheelbase = async () => {
         if (scanningWheel) return;
         setScanningWheel(true);
 
-        // Standard Gamepad API fallback (works everywhere)
         const checkGamepadAPI = () => {
             const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
             for (const gp of gamepads) {
@@ -207,7 +205,6 @@ const FfbManager = ({ gamePath }) => {
             return null;
         };
 
-        // Attempt Electron Native PowerShell PNP scan
         if (window.electronAPI && window.electronAPI.detectWheelbase) {
             try {
                 const res = await window.electronAPI.detectWheelbase();
@@ -221,12 +218,10 @@ const FfbManager = ({ gamePath }) => {
             }
         }
 
-        // Fallback to Gamepad API
         const gpResult = checkGamepadAPI();
         if (gpResult) {
             setDetectedWheel(gpResult);
         } else {
-            // MOCK Moza R5 search trigger for presentation if nothing is plugged
             setDetectedWheel({ detected: false, name: null });
         }
         setScanningWheel(false);
@@ -259,16 +254,69 @@ const FfbManager = ({ gamePath }) => {
         setInvertFfb(s.invertFfb);
         setActivePreset(presetKey);
 
-        // Immediate Save to LS
+        // Immediate write to physical config.ini
         const payload = { 
             ...s, 
             maxTorqueRef: detectedWheel.torque, 
             activePreset: presetKey 
         };
-        localStorage.setItem('mdt_ffb_settings', JSON.stringify(payload));
-        
+        writePhysicalConfigIni(payload);
+
         setSaveStatus(`Calibrado a ${detectedWheel.name} (${detectedWheel.torque} Nm)`);
         setTimeout(() => setSaveStatus(''), 2500);
+    };
+
+    // Select LMUFFB Directory picker
+    const handleSelectFfbPath = async () => {
+        if (window.electronAPI && window.electronAPI.selectDirectory) {
+            try {
+                const path = await window.electronAPI.selectDirectory();
+                if (path) {
+                    setFfbPath(path);
+                    localStorage.setItem('mdt_lmu_ffb_path', path);
+                    setSaveStatus('Ruta de LMUFFB guardada');
+                    setTimeout(() => setSaveStatus(''), 2500);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    };
+
+    // Writes settings to the physical LMUFFB config.ini on the disk!
+    const writePhysicalConfigIni = async (settings) => {
+        if (!window.electronAPI || !window.electronAPI.saveSetupFile) return;
+
+        const iniContent = `[General]
+active_preset = MDT_Custom
+
+[Preset:MDT_Custom]
+app_version = 0.7.385
+gain = ${(settings.masterGain / 100).toFixed(2)}
+max_torque_ref = ${settings.maxTorqueRef.toFixed(1)}
+steering_shaft_smoothing = ${settings.smoothing}
+understeer = ${(settings.understeerSlip / 100).toFixed(2)}
+curb_effect = ${(settings.curbEffect / 100).toFixed(2)}
+road_effect = ${(settings.roadEffect / 100).toFixed(2)}
+bump_dampening = ${(settings.bumpDampening / 100).toFixed(2)}
+wheel_weight = ${(settings.wheelWeight / 100).toFixed(2)}
+static_noise = ${settings.staticNoise}
+anti_oscillation = ${settings.antiOscillation}
+invert_force = ${settings.invertFfb ? 1 : 0}
+min_force = 0.00
+steering_shaft_gain = 1.00
+`;
+
+        try {
+            const filePath = `${ffbPath}\\config.ini`;
+            await window.electronAPI.saveSetupFile({
+                path: filePath,
+                content: iniContent
+            });
+            console.log(`[MDT FFB] Sincronización exitosa: config.ini guardado en ${filePath}`);
+        } catch (e) {
+            console.error('[MDT FFB] Error al escribir config.ini físico:', e);
+        }
     };
 
     // Save settings helper
@@ -290,7 +338,10 @@ const FfbManager = ({ gamePath }) => {
         };
         localStorage.setItem('mdt_ffb_settings', JSON.stringify(payload));
         
-        setSaveStatus('¡Configuración guardada!');
+        // Write to config.ini physically!
+        writePhysicalConfigIni(payload);
+
+        setSaveStatus('¡Configuración guardada en config.ini!');
         setTimeout(() => setSaveStatus(''), 2500);
     };
 
@@ -316,11 +367,13 @@ const FfbManager = ({ gamePath }) => {
         setInvertFfb(s.invertFfb);
         setActivePreset(presetKey);
 
-        // Immediate Save to LS
         const payload = { ...s, activePreset: presetKey };
         localStorage.setItem('mdt_ffb_settings', JSON.stringify(payload));
         
-        setSaveStatus(`Perfil '${pr.name}' cargado`);
+        // Write to config.ini physically!
+        writePhysicalConfigIni(payload);
+
+        setSaveStatus(`Perfil '${pr.name}' guardado`);
         setTimeout(() => setSaveStatus(''), 2500);
     };
 
@@ -401,12 +454,12 @@ const FfbManager = ({ gamePath }) => {
             ctx.fillText(`-LÍMITE CLIPPING (-${maxTorqueRef.toFixed(1)} Nm)`, canvas.width - 15, limitNeg + 10);
 
             // True Telemetry Data Source vs Simulated
+            const isReceivingLive = Date.now() - lastTelemetryTimeRef.current < 2000;
+
             if (isActive) {
-                const isReceivingLive = Date.now() - lastTelemetryTimeRef.current < 2000;
-                
                 if (isReceivingLive) {
                     // GENUINE Telemetry Feed directly from LMU Shared Memory!
-                    // Scale LMU's -1.0 to 1.0 FFB float according to our settings
+                    // Scale LMU's -1.0 to 1.0 FFB float according to our gain settings
                     const scaleFactor = (masterGain / 70); 
                     const liveFfb = lastFfbValueRef.current * scaleFactor;
                     
@@ -499,10 +552,9 @@ const FfbManager = ({ gamePath }) => {
             ctx.fillStyle = 'rgba(5, 5, 8, 0.82)';
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
             ctx.lineWidth = 1;
-            ctx.fillRect(15, 12, 270, 22);
-            ctx.strokeRect(15, 12, 270, 22);
+            ctx.fillRect(15, 12, 275, 22);
+            ctx.strokeRect(15, 12, 275, 22);
 
-            const isReceivingLive = Date.now() - lastTelemetryTimeRef.current < 2000;
             ctx.fillStyle = !isActive ? '#ff6b2b' : (isCurrentlyClipping ? '#ff4d4d' : '#00ff66');
             ctx.beginPath();
             ctx.arc(28, 23, 4.5, 0, Math.PI * 2);
@@ -518,7 +570,7 @@ const FfbManager = ({ gamePath }) => {
             } else if (isReceivingLive) {
                 statusLabel = isCurrentlyClipping 
                     ? '⚠️ CLIPPING EN VIVO: SATURACIÓN FFB REGISTRADA' 
-                    : '🟢 TELEMETRÍA EN VIVO: SEÑAL DE VUELTA IMPECABLE';
+                    : '🟢 TELEMETRÍA EN VIVO: CONECTADO AL COMPARTIDO LMU';
             } else {
                 statusLabel = isCurrentlyClipping 
                     ? '⚠️ ADVERTENCIA: SIMULACIÓN EN CLIPPING Nm' 
@@ -551,7 +603,7 @@ const FfbManager = ({ gamePath }) => {
                             MDT <span className="text-wec-cyan">FFB OPTIMIZER</span>
                         </h1>
                         <p className="text-xs text-white/30 tracking-wide">
-                            Ajustes calibrados de Force Feedback para Le Mans Ultimate. Configura la física exacta de tu base en un clic.
+                            Ajustes calibrados de Force Feedback para Le Mans Ultimate. Escribe y aplica la configuración directo en tu config.ini.
                         </p>
                     </div>
 
@@ -592,7 +644,7 @@ const FfbManager = ({ gamePath }) => {
                 <div className="wec-glass border border-wec-cyan/20 bg-wec-blue/5 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 animate-pulse">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-wec-cyan/10 flex items-center justify-center border border-wec-cyan/20">
-                            <svg className="w-5 h-5 text-wec-cyan animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={1.5} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10V2M10 12H2M14 12h8" /></svg>
+                            <svg className="w-5 h-5 text-wec-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={1.5} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10V2M10 12H2M14 12h8" /></svg>
                         </div>
                         <div>
                             <span className="text-[8px] font-bold text-wec-cyan tracking-widest block uppercase">Hardware Volante Detectado</span>
@@ -601,7 +653,7 @@ const FfbManager = ({ gamePath }) => {
                     </div>
                     <button
                         onClick={handleApplyDetectedCalibration}
-                        className="px-4 py-2 bg-wec-cyan text-wec-black hover:bg-white rounded-lg text-wec-display text-[9px] font-bold uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(0,212,255,0.25)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer shrink-0"
+                        className="px-4 py-2 bg-wec-cyan text-wec-black hover:bg-white rounded-lg text-wec-display text-[9px] font-bold uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(0,212,255,0.25)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer shrink-0 animate-bounce"
                     >
                         Aplicar Calibración de Torque en {detectedWheel.torque.toFixed(1)} Nm
                     </button>
@@ -637,9 +689,9 @@ const FfbManager = ({ gamePath }) => {
                     <div className="wec-glass rounded-xl border border-white/5 overflow-hidden flex flex-col">
                         <div className="px-4 py-3 bg-white/[0.02] border-b border-white/5 flex justify-between items-center shrink-0">
                             <span className="text-[9px] font-bold text-white/50 tracking-wider uppercase">Monitor de Señal en Tiempo Real</span>
-                            {isLiveTelemetry ? (
+                            {Date.now() - lastTelemetryTimeRef.current < 2000 ? (
                                 <span className="text-[8px] font-bold text-wec-green tracking-widest uppercase animate-pulse flex items-center gap-1.5">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-wec-green" /> EN VIVO (SHARED MEMORY)
+                                    <div className="w-1.5 h-1.5 rounded-full bg-wec-green animate-ping" /> EN VIVO (SHARED MEMORY)
                                 </span>
                             ) : (
                                 <span className="text-[8px] font-bold text-wec-cyan tracking-widest uppercase flex items-center gap-1.5">
@@ -656,10 +708,7 @@ const FfbManager = ({ gamePath }) => {
                             />
                         </div>
                         <div className="px-4 py-3 bg-white/[0.01] text-[10px] text-white/30 text-center italic border-t border-white/5">
-                            {isLiveTelemetry 
-                                ? 'Graficando FFB en tiempo real del juego. Si la señal toca las líneas límites rojas de Nm, sufrirás pérdida de detalle físico.'
-                                : 'Visualiza la oscilación de fuerza. Si la curva toca las líneas límites rojas de Nm, el FFB se aplanará y perderás detalle físico.'
-                            }
+                            Grafica el FFB físico en tiempo real de LMU. Si la señal toca las líneas límites rojas de Nm, sufrirás pérdida de detalle táctil.
                         </div>
                     </div>
 
@@ -699,6 +748,31 @@ const FfbManager = ({ gamePath }) => {
                 {/* Right Column: Detailed adjustments */}
                 <div className="xl:col-span-2 space-y-6">
                     <div className="wec-glass p-6 rounded-xl border border-white/5 space-y-6">
+                        
+                        {/* LMUFFB Path selection field */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/[0.01] border border-white/5 p-4 rounded-xl">
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-white uppercase tracking-wider block">Carpeta de LMUFFB (Donde está LMUFFB.exe)</label>
+                                <span className="text-[9px] text-white/30 block leading-tight">
+                                    Necesario para guardar físicamente tu configuración en el archivo **`config.ini`**.
+                                </span>
+                            </div>
+                            <div className="flex gap-2 w-full md:w-auto items-center">
+                                <input
+                                    type="text"
+                                    readOnly
+                                    value={ffbPath}
+                                    className="bg-black/40 border border-white/5 rounded px-3 py-2 text-[10px] text-white/60 tracking-wide w-full md:w-80 select-all"
+                                />
+                                <button
+                                    onClick={handleSelectFfbPath}
+                                    className="px-3 py-2 border border-white/10 hover:border-wec-cyan hover:bg-wec-blue/5 rounded text-white text-[9px] font-bold uppercase tracking-wider transition-all duration-300 shrink-0 cursor-pointer"
+                                >
+                                    Buscar
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="flex justify-between items-center border-b border-white/5 pb-4">
                             <div className="space-y-1">
                                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Ajustes Finos de Física FFB</h3>
@@ -849,7 +923,7 @@ const FfbManager = ({ gamePath }) => {
                                     className="w-full accent-white/40 bg-white/5 rounded-lg h-1"
                                 />
                                 <p className="text-[9px] leading-relaxed text-white/20">
-                                    Añade una inercia física simulada a la columna de dirección. Hace que el volante se sienta más denso y natural, reduciendo la flotabilidad en rectas.
+                                    Añade una inercia física simulada a la columna de dirección. Hace que el volante se sientan más denso y natural, reduciendo la flotabilidad en rectas.
                                 </p>
                             </div>
 
@@ -977,7 +1051,7 @@ const FfbManager = ({ gamePath }) => {
                             <div className="text-[10px] text-white/25 max-w-md bg-white/[0.01] border border-white/5 p-3 rounded-lg flex gap-2">
                                 <svg className="w-4 h-4 text-wec-cyan shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 <span>
-                                    **Integración Activa:** La aplicación sincroniza automáticamente el archivo `config.ini` de LMUFFB en la ruta de tu juego para aplicar los presets.
+                                    **Integración Activa:** La aplicación escribe automáticamente tu archivo `config.ini` físico cada vez que guardas o cambias de preset.
                                 </span>
                             </div>
                         </div>
