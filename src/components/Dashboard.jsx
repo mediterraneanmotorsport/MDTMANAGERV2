@@ -7,6 +7,7 @@ import AdminPanel from './AdminPanel';
 import Leaderboard from './Leaderboard';
 import SetupTweaker from './SetupTweaker';
 import LiveTelemetry from './LiveTelemetry';
+import FfbManager from './FfbManager';
 
 const NAV_ITEMS = [
     { id: 'circuits', label: 'EXPLORADOR', icon: (
@@ -20,6 +21,9 @@ const NAV_ITEMS = [
     )},
     { id: 'tweaker', label: 'MDT IA', icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+    )},
+    { id: 'ffb', label: 'MDT FFB', icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={1.5} /><circle cx="12" cy="12" r="2" stroke="currentColor" strokeWidth={1.5} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10V2M10 12H2M14 12h8M12 14l-3.5 6M12 14l3.5 6" /></svg>
     )},
 ];
 
@@ -354,6 +358,13 @@ const Dashboard = ({ gamePath, onSelectPath, userRole, circuits, categories, all
                     {activeView === 'tweaker' && (
                         <div className="wec-enter px-8 lg:px-12">
                             <SetupTweaker gamePath={gamePath} />
+                        </div>
+                    )}
+
+                    {/* ── FFB VIEW ── */}
+                    {activeView === 'ffb' && (
+                        <div className="wec-enter px-8 lg:px-12 pb-12">
+                            <FfbManager gamePath={gamePath} />
                         </div>
                     )}
                 </div>
